@@ -1,10 +1,17 @@
-# Dashboard App
+# RecruitAI Dashboard
 
-Placeholder for the RecruitAI recruiter dashboard.
+Sprint 1 recruiter workflow frontend.
 
-Planned Sprint 1-2 screens:
+## Scope
 
-- CV upload and processing status
-- Candidate ranking table
-- Explainability card
-- Shortlist/reject/review actions
+- Login screen with Recruiter role skeleton
+- PDF upload screen
+- End-to-end upload to processing status flow
+- Basic parse quality monitoring panel
+- Responsive recruiter dashboard layout
+
+## Run
+
+Open `apps/dashboard/index.html` in a browser.
+
+No build step is required for Sprint 1 because the dashboard uses framework-free HTML, CSS, and JavaScript modules suitable for the current repository baseline.
