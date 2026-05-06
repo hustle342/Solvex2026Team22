@@ -309,22 +309,76 @@ class TestProjectsExtraction:
 
 
 class TestConfidenceScoring:
-    """Confidence and field-confidence scoring."""
+    """10 Deterministic tests for Confidence and field-confidence scoring v2."""
 
-    def test_full_cv_high_confidence(self):
+    def test_1_full_cv_high_confidence(self):
         result = _make_result_from_text(_CV_TEXT)
         assert result.confidence_score >= 0.80
 
-    def test_empty_text_low_confidence(self):
+    def test_2_empty_text_low_confidence(self):
         result = _make_result_from_text("")
-        # v2.0: ocr_penalty=1.0 (no OCR used) contributes small non-zero
         assert result.confidence_score <= 0.15
 
-    def test_field_confidences_present(self):
+    def test_3_field_confidences_present(self):
         result = _make_result_from_text(_CV_TEXT)
         assert "name" in result.field_confidences
         assert "email" in result.field_confidences
         assert "skills" in result.field_confidences
+
+    def test_4_only_contact_info(self):
+        text = "Ahmet Yilmaz\nahmet@email.com\n+905321234567"
+        result = _make_result_from_text(text)
+        assert result.field_confidences["name"] == 1.0
+        assert result.field_confidences["email"] == 1.0
+        assert result.field_confidences["phone"] == 1.0
+        assert result.field_confidences["experience"] == 0.0
+        assert result.confidence_score > 0.2 and result.confidence_score < 0.5
+
+    def test_5_only_experience_and_education(self):
+        text = "Education\nITU Bilgisayar 2014-2018\n\nExperience\nABC A.S. 2018-2020 Developer"
+        result = _make_result_from_text(text)
+        assert result.field_confidences["experience"] > 0
+        assert result.field_confidences["education"] > 0
+
+    def test_6_high_ocr_penalty(self):
+        # Simulate high OCR ratio directly
+        from backend.cv_parser.pdf_parser import PDFCVParser, ParseResult
+        parser = PDFCVParser()
+        result = ParseResult(total_pages=10, ocr_pages=10)
+        confs = parser._compute_field_confidences(result)
+        assert confs["ocr_penalty"] == 0.7  # 1.0 - (1.0 * 0.3)
+
+    def test_7_no_ocr_penalty(self):
+        from backend.cv_parser.pdf_parser import PDFCVParser, ParseResult
+        parser = PDFCVParser()
+        result = ParseResult(total_pages=5, ocr_pages=0)
+        confs = parser._compute_field_confidences(result)
+        assert confs["ocr_penalty"] == 1.0
+
+    def test_8_partial_ocr_penalty(self):
+        from backend.cv_parser.pdf_parser import PDFCVParser, ParseResult
+        parser = PDFCVParser()
+        result = ParseResult(total_pages=4, ocr_pages=2) # 50% OCR
+        confs = parser._compute_field_confidences(result)
+        assert confs["ocr_penalty"] == 0.85 # 1.0 - (0.5 * 0.3)
+
+    def test_9_text_quality_scaling(self):
+        from backend.cv_parser.pdf_parser import PDFCVParser, ParseResult
+        parser = PDFCVParser()
+        result = ParseResult(total_pages=1, raw_text="a" * 250)
+        confs = parser._compute_field_confidences(result)
+        assert confs["text_quality"] == 0.5
+
+    def test_10_section_richness_scaling(self):
+        from backend.cv_parser.pdf_parser import PDFCVParser, ParseResult
+        parser = PDFCVParser()
+        result = ParseResult(sections_detected=["education", "experience"])
+        confs = parser._compute_field_confidences(result)
+        assert confs["section_richness"] == 0.5  # 2 distinct sections / 4.0
+        result2 = ParseResult(sections_detected=["education", "experience", "skills", "languages", "projects"])
+        confs2 = parser._compute_field_confidences(result2)
+        assert confs2["section_richness"] == 1.0  # Caps at 1.0
+
 
 
 class TestSerialisation:

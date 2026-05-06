@@ -46,6 +46,17 @@ from .config import (
 # ── Logging ────────────────────────────────────────────────────────────────
 logger = logging.getLogger("recruitai.cv_parser")
 
+# ── Pre-compiled Regex Patterns (v2.0 Optimization) ────────────────────────
+COMPILED_EMAIL = re.compile(EMAIL_PATTERN, re.IGNORECASE)
+COMPILED_PHONE = re.compile(PHONE_PATTERN)
+COMPILED_LINKEDIN = re.compile(LINKEDIN_PATTERN, re.IGNORECASE)
+COMPILED_GITHUB = re.compile(GITHUB_PATTERN, re.IGNORECASE)
+COMPILED_DATE_RANGE = re.compile(DATE_RANGE_PATTERN, re.IGNORECASE)
+
+COMPILED_SECTIONS = {}
+for sec_name, pats in SECTION_PATTERNS.items():
+    COMPILED_SECTIONS[sec_name] = [re.compile(p, re.IGNORECASE) for p in pats]
+
 
 # ── Data classes ───────────────────────────────────────────────────────────
 @dataclass
@@ -108,6 +119,7 @@ class ParseResult:
     field_confidences: Dict[str, float] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
     error: Optional[str] = None
+    telemetry: Dict[str, Any] = field(default_factory=dict)
 
     # ── Serialisation helpers ──────────────────────────────────────────
     def to_dict(self) -> Dict[str, Any]:
@@ -160,13 +172,23 @@ class PDFCVParser:
             result.source_file = source_label
             result.file_hash = hashlib.sha256(pdf_bytes).hexdigest()
 
+            if self.config.telemetry_enabled:
+                result.telemetry = {
+                    "ocr_pages_attempted": 0,
+                    "ocr_pages_successful": 0,
+                    "ocr_timeouts": 0,
+                    "avg_cpu_time_per_page_ms": 0.0
+                }
+
             # ── Validate ────────────────────────────────────────────
             self._validate_pdf(pdf_bytes)
 
             # ── Extract text ────────────────────────────────────────
-            raw_text, total_pages, ocr_pages, page_warnings = self._extract_text(
+            extract_start = time.perf_counter()
+            raw_text, total_pages, ocr_pages, page_warnings, ocr_metrics = self._extract_text(
                 pdf_bytes
             )
+            extract_time = (time.perf_counter() - extract_start) * 1000
             result.raw_text = raw_text
             result.total_pages = total_pages
             result.ocr_pages = ocr_pages
@@ -190,6 +212,10 @@ class PDFCVParser:
             result.languages = self._extract_languages(sections)
             result.certifications = self._extract_certifications(sections)
             result.projects = self._extract_projects(sections)
+            
+            if self.config.telemetry_enabled and total_pages > 0:
+                result.telemetry.update(ocr_metrics)
+                result.telemetry["avg_cpu_time_per_page_ms"] = round(extract_time / total_pages, 2)
 
             # ── Confidence scoring ──────────────────────────────────
             result.field_confidences = self._compute_field_confidences(result)
@@ -270,17 +296,18 @@ class PDFCVParser:
     # ── Text Extraction ────────────────────────────────────────────────
     def _extract_text(
         self, pdf_bytes: bytes
-    ) -> Tuple[str, int, int, List[str]]:
+    ) -> Tuple[str, int, int, List[str], Dict[str, int]]:
         """
         Extract text page-by-page. Falls back to OCR if a page yields
         insufficient text.
 
-        Returns (full_text, total_pages, ocr_page_count, warnings).
+        Returns (full_text, total_pages, ocr_page_count, warnings, ocr_metrics).
         """
         pages_text: List[str] = []
         ocr_pages = 0
         warnings: List[str] = []
         total_pages = 0
+        ocr_metrics = {"ocr_pages_attempted": 0, "ocr_pages_successful": 0, "ocr_timeouts": 0}
 
         try:
             with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -305,8 +332,12 @@ class PDFCVParser:
                         len(text.strip()) < self.config.min_text_length
                         and self.config.enable_ocr_fallback
                     ):
-                        ocr_text = self._ocr_page(pdf_bytes, page_num)
-                        if ocr_text:
+                        ocr_metrics["ocr_pages_attempted"] += 1
+                        ocr_text, is_timeout = self._ocr_page(pdf_bytes, page_num)
+                        if is_timeout:
+                            ocr_metrics["ocr_timeouts"] += 1
+                        elif ocr_text:
+                            ocr_metrics["ocr_pages_successful"] += 1
                             text = ocr_text
                             ocr_pages += 1
                             warnings.append(
@@ -323,12 +354,12 @@ class PDFCVParser:
             ) from exc
 
         full_text = "\n\n".join(pages_text)
-        return full_text, total_pages, ocr_pages, warnings
+        return full_text, total_pages, ocr_pages, warnings, ocr_metrics
 
-    def _ocr_page(self, pdf_bytes: bytes, page_number: int) -> Optional[str]:
+    def _ocr_page(self, pdf_bytes: bytes, page_number: int) -> Tuple[Optional[str], bool]:
         """
         Run OCR on a single page using pdf2image + pytesseract.
-        Returns extracted text or None on failure.
+        Returns (extracted_text, is_timeout).
         Enforces per-page timeout (v2.0).
         """
         def _do_ocr() -> Optional[str]:
@@ -351,23 +382,23 @@ class PDFCVParser:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(_do_ocr)
-                return future.result(timeout=self.config.ocr_timeout_seconds)
+                return future.result(timeout=self.config.ocr_timeout_seconds), False
 
         except concurrent.futures.TimeoutError:
             logger.warning(
                 "OCR timeout on page %d (limit: %ds)",
                 page_number, self.config.ocr_timeout_seconds,
             )
-            return None
+            return None, True
         except ImportError:
             logger.warning(
                 "OCR dependencies (pdf2image / pytesseract) not installed. "
                 "Skipping OCR fallback."
             )
-            return None
+            return None, False
         except Exception as exc:  # noqa: BLE001
             logger.warning("OCR failed on page %d: %s", page_number, exc)
-            return None
+            return None, False
 
     # ── Section Detection ──────────────────────────────────────────────
     _MAX_HEADER_LINE_LENGTH = 60
@@ -386,9 +417,9 @@ class PDFCVParser:
         if not stripped or len(stripped) > self._MAX_HEADER_LINE_LENGTH:
             return None
 
-        for section_name, patterns in SECTION_PATTERNS.items():
-            for pattern in patterns:
-                m = re.search(pattern, stripped)
+        for section_name, compiled_patterns in COMPILED_SECTIONS.items():
+            for cp in compiled_patterns:
+                m = cp.search(stripped)
                 if m and m.start() < 30:
                     return section_name
         return None
@@ -434,22 +465,22 @@ class PDFCVParser:
         contact = ContactInfo()
 
         # Email
-        email_match = re.search(EMAIL_PATTERN, full_text)
+        email_match = COMPILED_EMAIL.search(full_text)
         if email_match:
             contact.email = email_match.group(0).lower()
 
         # Phone
-        phone_match = re.search(PHONE_PATTERN, full_text)
+        phone_match = COMPILED_PHONE.search(full_text)
         if phone_match:
             contact.phone = phone_match.group(0).strip()
 
         # LinkedIn
-        li_match = re.search(LINKEDIN_PATTERN, full_text)
+        li_match = COMPILED_LINKEDIN.search(full_text)
         if li_match:
             contact.linkedin = li_match.group(0)
 
         # GitHub
-        gh_match = re.search(GITHUB_PATTERN, full_text)
+        gh_match = COMPILED_GITHUB.search(full_text)
         if gh_match:
             contact.github = gh_match.group(0)
 
@@ -459,13 +490,13 @@ class PDFCVParser:
             if (
                 candidate
                 and len(candidate) < 60
-                and not re.search(EMAIL_PATTERN, candidate)
-                and not re.search(PHONE_PATTERN, candidate)
-                and not re.search(r"https?://", candidate)
+                and not COMPILED_EMAIL.search(candidate)
+                and not COMPILED_PHONE.search(candidate)
+                and not re.search(r"https?://", candidate, re.IGNORECASE)
                 and not any(
-                    re.search(p, candidate)
-                    for patterns in SECTION_PATTERNS.values()
-                    for p in patterns
+                    cp.search(candidate)
+                    for compiled_patterns in COMPILED_SECTIONS.values()
+                    for cp in compiled_patterns
                 )
             ):
                 contact.name = candidate
@@ -489,7 +520,7 @@ class PDFCVParser:
         entry = EducationEntry(raw_text=raw)
 
         # Try date range
-        date_match = re.search(DATE_RANGE_PATTERN, raw, re.IGNORECASE)
+        date_match = COMPILED_DATE_RANGE.search(raw)
         if date_match:
             entry.start_date = date_match.group(1)
             entry.end_date = date_match.group(2)
@@ -528,7 +559,7 @@ class PDFCVParser:
                 continue
             entry = ExperienceEntry(raw_text=block)
 
-            date_match = re.search(DATE_RANGE_PATTERN, block, re.IGNORECASE)
+            date_match = COMPILED_DATE_RANGE.search(block)
             if date_match:
                 entry.start_date = date_match.group(1)
                 entry.end_date = date_match.group(2)
@@ -561,12 +592,12 @@ class PDFCVParser:
         current_block: List[str] = []
         result_blocks: List[str] = []
         for line in lines:
-            if re.search(DATE_RANGE_PATTERN, line, re.IGNORECASE) and current_block:
+            if COMPILED_DATE_RANGE.search(line) and current_block:
                 # The date is usually on the line *after* the company name,
                 # so we keep it in the current block.
                 # But if the previous block already has a date, start new.
                 prev_text = "\n".join(current_block)
-                if re.search(DATE_RANGE_PATTERN, prev_text, re.IGNORECASE):
+                if COMPILED_DATE_RANGE.search(prev_text):
                     result_blocks.append(prev_text)
                     current_block = []
             current_block.append(line)
