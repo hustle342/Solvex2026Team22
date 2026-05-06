@@ -54,14 +54,26 @@ Sprint bazli plan, rol dagilimi ve KPI odakli teslim modeli burada:
 
 ## Hemen Basla
 
-1. KPI baseline verisini guncelle: [KPI_BASELINE_TIMESTUDY.csv](KPI_BASELINE_TIMESTUDY.csv)
-2. Baseline ozetini uret:
+1. Sprint 1 dashboard akisini ac: [apps/dashboard/index.html](apps/dashboard/index.html)
+2. KPI baseline verisini guncelle: [KPI_BASELINE_TIMESTUDY.csv](KPI_BASELINE_TIMESTUDY.csv)
+3. Baseline ozetini uret:
 
 ```powershell
 PowerShell -ExecutionPolicy Bypass -File .\scripts\compute_kpi_baseline.ps1
 ```
 
-3. Sonucu kontrol et: [KPI_BASELINE_SUMMARY.md](KPI_BASELINE_SUMMARY.md)
+4. Sonucu kontrol et: [KPI_BASELINE_SUMMARY.md](KPI_BASELINE_SUMMARY.md)
+
+## Sprint 1 Frontend
+
+Recruiter workflow ekranlari eklendi:
+
+- Login ve Recruiter rol iskeleti
+- PDF CV upload akisi
+- Processing status takibi
+- Parse quality monitoring paneli
+
+Detayli dogrulama notu: [docs/sprint1-frontend-validation.md](docs/sprint1-frontend-validation.md)
 
 ## Takim
 
