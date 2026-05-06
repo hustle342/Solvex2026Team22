@@ -32,6 +32,13 @@ This document defines how RecruitAI KPI metrics are measured, reported, and gove
 4. Record parser and ranking quality on the same sample set.
 5. Lock baseline values before Sprint 1 starts.
 
+## Day-1 Execution Checklist
+1. Open KPI_BASELINE_TIMESTUDY.csv and fill manual screening minutes for each reviewed CV.
+2. Ensure each role type has at least 3 initial samples in Sprint 0 day-1.
+3. Compute temporary median manual screening time per role.
+4. Update KPI_WEEKLY_TRACKER.csv notes with observed data quality issues.
+5. Publish a short weekly note in the KPI Governance issue.
+
 ## Weekly Reporting Workflow
 1. Monday: Confirm data extraction window.
 2. Wednesday: Mid-week risk check on metric trends.

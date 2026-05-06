@@ -1,0 +1,10 @@
+sample_id,week_id,role_type,cv_id,manual_screening_minutes,decision_label,recruiter_id,notes
+1,2026-W19,Backend Engineer,CV-001,,,Serdar,
+2,2026-W19,Backend Engineer,CV-002,,,Serdar,
+3,2026-W19,Backend Engineer,CV-003,,,Serdar,
+4,2026-W19,Frontend Engineer,CV-004,,,Serdar,
+5,2026-W19,Frontend Engineer,CV-005,,,Serdar,
+6,2026-W19,Frontend Engineer,CV-006,,,Serdar,
+7,2026-W19,Data Analyst,CV-007,,,Serdar,
+8,2026-W19,Data Analyst,CV-008,,,Serdar,
+9,2026-W19,Data Analyst,CV-009,,,Serdar,
