@@ -1,85 +1,280 @@
 // Frontend Sprint 1: Recruiter Workflow
 
-const demoState = {
-  session: null,
-  activeView: "login",
-  selectedFile: null,
-  processing: null,
-  history: [
-    {
-      id: "cv-1842",
-      fileName: "ayse-yilmaz-ai-engineer.pdf",
-      status: "Ready",
-      progress: 100,
-      uploadedAt: "09:42",
-      parseQuality: {
-        overall: 91,
-        contact: 96,
-        experience: 88,
-        skills: 93,
-        education: 86,
-        confidence: "High",
-      },
-    },
-    {
-      id: "cv-1839",
-      fileName: "mehmet-kaya-frontend.pdf",
-      status: "Needs Review",
-      progress: 100,
-      uploadedAt: "09:18",
-      parseQuality: {
-        overall: 74,
-        contact: 83,
-        experience: 69,
-        skills: 76,
-        education: 68,
-        confidence: "Medium",
-      },
-    },
-  ],
+const DEFAULT_CREDENTIALS = {
+  email: "recruiter@recruitai.local",
+  password: "demo1234",
+  role: "recruiter",
 };
 
-const app = document.querySelector("#app");
+const PROCESSING_UPDATES = [
+  ["Parsing", 32, { overall: 58, contact: 72, experience: 45, skills: 54, education: 51, confidence: "Low" }],
+  ["Normalizing", 58, { overall: 76, contact: 86, experience: 69, skills: 78, education: 71, confidence: "Medium" }],
+  ["Quality Check", 84, { overall: 87, contact: 94, experience: 82, skills: 89, education: 83, confidence: "High" }],
+  ["Ready", 100, { overall: 89, contact: 95, experience: 84, skills: 91, education: 86, confidence: "High" }],
+];
 
-seedDemoFromQuery();
+function createInitialState() {
+  return {
+    session: null,
+    activeView: "login",
+    selectedFile: null,
+    error: null,
+    processing: null,
+    history: [
+      {
+        id: "cv-1842",
+        fileName: "ayse-yilmaz-ai-engineer.pdf",
+        status: "Ready",
+        progress: 100,
+        uploadedAt: "09:42",
+        parseQuality: {
+          overall: 91,
+          contact: 96,
+          experience: 88,
+          skills: 93,
+          education: 86,
+          confidence: "High",
+        },
+      },
+      {
+        id: "cv-1839",
+        fileName: "mehmet-kaya-frontend.pdf",
+        status: "Needs Review",
+        progress: 100,
+        uploadedAt: "09:18",
+        parseQuality: {
+          overall: 74,
+          contact: 83,
+          experience: 69,
+          skills: 76,
+          education: 68,
+          confidence: "Medium",
+        },
+      },
+    ],
+  };
+}
 
-function render() {
-  if (!demoState.session) {
-    app.innerHTML = loginView();
-    bindLogin();
-    return;
+function authenticate(credentials, authService = defaultAuthService) {
+  return authService.login(credentials);
+}
+
+const defaultAuthService = {
+  login(credentials) {
+    const email = String(credentials.email || "").trim().toLowerCase();
+    const password = String(credentials.password || "");
+    const role = String(credentials.role || "");
+
+    if (!email || !password) {
+      return { ok: false, message: "Email and password are required." };
+    }
+    if (role !== DEFAULT_CREDENTIALS.role) {
+      return { ok: false, message: "Only Recruiter role is enabled for Sprint 1." };
+    }
+    if (email !== DEFAULT_CREDENTIALS.email || password !== DEFAULT_CREDENTIALS.password) {
+      return { ok: false, message: "Invalid recruiter credentials." };
+    }
+    return {
+      ok: true,
+      session: {
+        email,
+        role,
+      },
+    };
+  },
+};
+
+function validatePdfFile(file, maxSizeBytes = 10 * 1024 * 1024) {
+  if (!file) {
+    return { valid: false, message: "Please select a PDF CV." };
   }
 
-  app.innerHTML = dashboardView();
-  bindDashboard();
+  const fileName = String(file.name || "");
+  const mimeType = String(file.type || "");
+  const isPdf = fileName.toLowerCase().endsWith(".pdf") || mimeType === "application/pdf";
+
+  if (!isPdf) {
+    return { valid: false, message: "Please upload a PDF CV." };
+  }
+  if (Number(file.size || 0) > maxSizeBytes) {
+    return { valid: false, message: "PDF CV must be 10MB or smaller." };
+  }
+  return { valid: true, message: "" };
 }
 
-function seedDemoFromQuery() {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("demo") !== "ready") return;
+function createRecruiterWorkflow(options = {}) {
+  const root = options.root || (typeof document !== "undefined" ? document.querySelector("#app") : null);
+  const authService = options.authService || defaultAuthService;
+  const timerApi = options.timerApi || (typeof window !== "undefined" ? window : globalThis);
+  const clock = options.clock || (() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  const state = options.state || createInitialState();
 
-  demoState.session = {
-    email: "recruiter@recruitai.local",
-    role: "recruiter",
-  };
-  demoState.processing = {
-    id: "cv-demo-ready",
-    fileName: "demo-senior-ai-engineer.pdf",
-    status: "Ready",
-    progress: 100,
-    uploadedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    parseQuality: {
-      overall: 89,
-      contact: 95,
-      experience: 84,
-      skills: 91,
-      education: 86,
-      confidence: "High",
+  const controller = {
+    state,
+    root,
+    render() {
+      if (!root) return;
+      if (!state.session) {
+        root.innerHTML = loginView(state);
+        this.bindLogin();
+        return;
+      }
+
+      root.innerHTML = dashboardView(state);
+      this.bindDashboard();
+    },
+    bindLogin() {
+      const form = root.querySelector("#loginForm");
+      if (!form) return;
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        this.handleLogin({
+          email: root.querySelector("#email").value,
+          password: root.querySelector("#password").value,
+          role: root.querySelector("#role").value,
+        });
+      });
+    },
+    bindDashboard() {
+      const logoutButton = root.querySelector("#logoutButton");
+      if (logoutButton) {
+        logoutButton.addEventListener("click", () => this.logout());
+      }
+
+      const input = root.querySelector("#fileInput");
+      if (input) {
+        input.addEventListener("change", () => this.selectFile(input.files[0]));
+      }
+
+      const dropZone = root.querySelector("#dropZone");
+      if (dropZone) {
+        dropZone.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          dropZone.classList.add("dragging");
+        });
+        dropZone.addEventListener("dragleave", () => {
+          dropZone.classList.remove("dragging");
+        });
+        dropZone.addEventListener("drop", (event) => {
+          event.preventDefault();
+          dropZone.classList.remove("dragging");
+          this.selectFile(event.dataTransfer.files[0]);
+        });
+      }
+
+      const startButton = root.querySelector("#startProcessing");
+      if (startButton) {
+        startButton.addEventListener("click", () => {
+          if (state.selectedFile) {
+            this.startProcessing(state.selectedFile);
+          }
+        });
+      }
+    },
+    handleLogin(credentials) {
+      const result = authenticate(credentials, authService);
+      if (!result.ok) {
+        state.error = result.message;
+        this.render();
+        return false;
+      }
+
+      state.session = result.session;
+      state.error = null;
+      state.activeView = "dashboard";
+      this.render();
+      return true;
+    },
+    logout() {
+      state.session = null;
+      state.selectedFile = null;
+      state.error = null;
+      state.activeView = "login";
+      this.render();
+    },
+    selectFile(file) {
+      const result = validatePdfFile(file);
+      if (!result.valid) {
+        state.error = result.message;
+        state.selectedFile = null;
+        this.render();
+        return false;
+      }
+
+      state.selectedFile = file;
+      state.error = null;
+      this.render();
+      return true;
+    },
+    startProcessing(file) {
+      const result = validatePdfFile(file);
+      if (!result.valid) {
+        state.error = result.message;
+        this.render();
+        return false;
+      }
+
+      state.processing = {
+        id: `cv-${Date.now()}`,
+        fileName: file.name,
+        status: "Queued",
+        progress: 8,
+        uploadedAt: clock(),
+        parseQuality: {
+          overall: 42,
+          contact: 48,
+          experience: 36,
+          skills: 44,
+          education: 40,
+          confidence: "Calculating",
+        },
+      };
+      state.selectedFile = null;
+      state.error = null;
+      this.render();
+
+      PROCESSING_UPDATES.forEach(([status, progress, quality], index) => {
+        timerApi.setTimeout(() => {
+          if (!state.processing) return;
+          state.processing.status = status;
+          state.processing.progress = progress;
+          state.processing.parseQuality = quality;
+          this.render();
+        }, (index + 1) * 900);
+      });
+      return true;
+    },
+    seedDemoFromQuery(search) {
+      const params = new URLSearchParams(search || (typeof window !== "undefined" ? window.location.search : ""));
+      if (params.get("demo") !== "ready") return false;
+
+      state.session = {
+        email: DEFAULT_CREDENTIALS.email,
+        role: DEFAULT_CREDENTIALS.role,
+      };
+      state.processing = {
+        id: "cv-demo-ready",
+        fileName: "demo-senior-ai-engineer.pdf",
+        status: "Ready",
+        progress: 100,
+        uploadedAt: clock(),
+        parseQuality: {
+          overall: 89,
+          contact: 95,
+          experience: 84,
+          skills: 91,
+          education: 86,
+          confidence: "High",
+        },
+      };
+      return true;
     },
   };
+
+  return controller;
 }
 
-function loginView() {
+function loginView(state) {
   return `
     <section class="login-layout">
       <div class="brand-panel">
@@ -97,6 +292,8 @@ function loginView() {
           <p class="eyebrow">Recruiter Access</p>
           <h2>Sign in</h2>
         </div>
+
+        ${state.error ? `<p class="error-banner" role="alert">${escapeHtml(state.error)}</p>` : ""}
 
         <label>
           Email
@@ -123,8 +320,8 @@ function loginView() {
   `;
 }
 
-function dashboardView() {
-  const active = demoState.processing || demoState.history[0];
+function dashboardView(state) {
+  const active = state.processing || state.history[0];
   return `
     <section class="dashboard-layout">
       <aside class="sidebar">
@@ -141,8 +338,8 @@ function dashboardView() {
           <button class="nav-item" type="button">Quality</button>
         </nav>
         <div class="user-card">
-          <span>${escapeHtml(demoState.session.email)}</span>
-          <strong>${capitalize(demoState.session.role)}</strong>
+          <span>${escapeHtml(state.session.email)}</span>
+          <strong>${capitalize(state.session.role)}</strong>
           <button id="logoutButton" type="button">Sign out</button>
         </div>
       </aside>
@@ -156,20 +353,22 @@ function dashboardView() {
           <span class="role-pill">Recruiter</span>
         </header>
 
+        ${state.error ? `<p class="error-banner" role="alert">${escapeHtml(state.error)}</p>` : ""}
+
         <section class="workflow-grid">
-          ${uploadPanel()}
+          ${uploadPanel(state)}
           ${statusPanel(active)}
           ${qualityPanel(active)}
         </section>
 
-        ${historyPanel()}
+        ${historyPanel(state)}
       </section>
     </section>
   `;
 }
 
-function uploadPanel() {
-  const selectedName = demoState.selectedFile ? demoState.selectedFile.name : "No PDF selected";
+function uploadPanel(state) {
+  const selectedName = state.selectedFile ? state.selectedFile.name : "No PDF selected";
   return `
     <article class="panel upload-panel">
       <div class="panel-heading">
@@ -184,7 +383,7 @@ function uploadPanel() {
         <small>Drop a PDF here or browse from your device.</small>
       </label>
 
-      <button id="startProcessing" class="primary-action" type="button" ${demoState.selectedFile ? "" : "disabled"}>
+      <button id="startProcessing" class="primary-action" type="button" ${state.selectedFile ? "" : "disabled"}>
         Start parsing
       </button>
     </article>
@@ -251,8 +450,8 @@ function qualityPanel(item) {
   `;
 }
 
-function historyPanel() {
-  const rows = [demoState.processing, ...demoState.history].filter(Boolean);
+function historyPanel(state) {
+  const rows = [state.processing, ...state.history].filter(Boolean);
   return `
     <section class="history-section">
       <div class="section-heading">
@@ -301,103 +500,6 @@ function qualityMetric(label, value) {
   `;
 }
 
-function bindLogin() {
-  document.querySelector("#loginForm").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const role = document.querySelector("#role").value;
-    if (role !== "recruiter") {
-      alert("Sprint 1 only enables the Recruiter role.");
-      return;
-    }
-    demoState.session = {
-      email: document.querySelector("#email").value,
-      role,
-    };
-    demoState.activeView = "dashboard";
-    render();
-  });
-}
-
-function bindDashboard() {
-  document.querySelector("#logoutButton").addEventListener("click", () => {
-    demoState.session = null;
-    demoState.selectedFile = null;
-    render();
-  });
-
-  const input = document.querySelector("#fileInput");
-  input.addEventListener("change", () => {
-    const file = input.files[0];
-    if (file) {
-      demoState.selectedFile = file;
-      render();
-    }
-  });
-
-  const dropZone = document.querySelector("#dropZone");
-  dropZone.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    dropZone.classList.add("dragging");
-  });
-  dropZone.addEventListener("dragleave", () => {
-    dropZone.classList.remove("dragging");
-  });
-  dropZone.addEventListener("drop", (event) => {
-    event.preventDefault();
-    dropZone.classList.remove("dragging");
-    const file = event.dataTransfer.files[0];
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      alert("Please upload a PDF CV.");
-      return;
-    }
-    demoState.selectedFile = file;
-    render();
-  });
-
-  document.querySelector("#startProcessing").addEventListener("click", () => {
-    if (!demoState.selectedFile) return;
-    startProcessing(demoState.selectedFile);
-  });
-}
-
-function startProcessing(file) {
-  demoState.processing = {
-    id: `cv-${Date.now()}`,
-    fileName: file.name,
-    status: "Queued",
-    progress: 8,
-    uploadedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    parseQuality: {
-      overall: 42,
-      contact: 48,
-      experience: 36,
-      skills: 44,
-      education: 40,
-      confidence: "Calculating",
-    },
-  };
-  demoState.selectedFile = null;
-  render();
-
-  const updates = [
-    ["Parsing", 32, { overall: 58, contact: 72, experience: 45, skills: 54, education: 51, confidence: "Low" }],
-    ["Normalizing", 58, { overall: 76, contact: 86, experience: 69, skills: 78, education: 71, confidence: "Medium" }],
-    ["Quality Check", 84, { overall: 87, contact: 94, experience: 82, skills: 89, education: 83, confidence: "High" }],
-    ["Ready", 100, { overall: 89, contact: 95, experience: 84, skills: 91, education: 86, confidence: "High" }],
-  ];
-
-  updates.forEach(([status, progress, quality], index) => {
-    window.setTimeout(() => {
-      if (!demoState.processing) return;
-      demoState.processing.status = status;
-      demoState.processing.progress = progress;
-      demoState.processing.parseQuality = quality;
-      render();
-    }, (index + 1) * 900);
-  });
-}
-
 function statusClass(status) {
   return status.toLowerCase().replace(/\s+/g, "-");
 }
@@ -415,4 +517,24 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-render();
+/* istanbul ignore next */
+if (typeof module !== "undefined") {
+  module.exports = {
+    PROCESSING_UPDATES,
+    authenticate,
+    createInitialState,
+    createRecruiterWorkflow,
+    defaultAuthService,
+    escapeHtml,
+    statusClass,
+    validatePdfFile,
+  };
+}
+
+/* istanbul ignore next */
+if (typeof module === "undefined") {
+  const app = document.querySelector("#app");
+  const workflow = createRecruiterWorkflow({ root: app });
+  workflow.seedDemoFromQuery();
+  workflow.render();
+}
