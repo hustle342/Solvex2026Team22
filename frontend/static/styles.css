@@ -665,6 +665,68 @@ tr:hover td { background: var(--bg-glass); }
   letter-spacing: 0.3px;
 }
 
+.email-cv-modal {
+  max-width: 760px;
+}
+
+.email-cv-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.email-cv-list {
+  display: grid;
+  gap: 10px;
+}
+
+.email-cv-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-glass);
+}
+
+.email-cv-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.email-cv-main span,
+.email-cv-main small {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.email-cv-main small {
+  font-size: 12px;
+}
+
+.email-cv-error {
+  color: var(--danger) !important;
+}
+
+.email-cv-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.email-cv-score {
+  min-width: 70px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
 .exp-item {
   padding: 10px 0;
   border-bottom: 1px solid #edf2f6;
@@ -1036,6 +1098,15 @@ tr:hover td { background: var(--bg-glass); }
   .modal { width: 95%; padding: 24px; }
   th, td { padding: 12px 16px; }
   .skills-cell { max-width: 160px; }
+  .email-cv-row,
+  .email-cv-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .email-cv-actions .btn,
+  .email-cv-score {
+    width: 100% !important;
+  }
   .chat-panel {
     width: calc(100vw - 24px);
     height: calc(100vh - 140px);

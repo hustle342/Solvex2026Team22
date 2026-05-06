@@ -28,6 +28,7 @@ from backend.api.upload import router as upload_router, init_upload_deps
 from backend.api.match import router as match_router
 from backend.api.chatbot import router as chatbot_router
 from backend.api.auth import router as auth_router
+from backend.api.email_cv import router as email_cv_router, init_email_cv_deps
 
 # ── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -48,6 +49,8 @@ async def lifespan(app: FastAPI):
     # Initialise upload dependencies (storage, worker, job store)
     init_upload_deps()
     logger.info("Upload dependencies initialised")
+    init_email_cv_deps()
+    logger.info("Email CV plugin initialised")
     # Create DB tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -87,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(upload_router, prefix=settings.API_PREFIX)
     app.include_router(match_router, prefix=settings.API_PREFIX)
     app.include_router(chatbot_router, prefix=f"{settings.API_PREFIX}/chatbot")
+    app.include_router(email_cv_router, prefix=settings.API_PREFIX)
 
     # ── Health check ───────────────────────────────────────────────
     @app.get("/health", tags=["system"])

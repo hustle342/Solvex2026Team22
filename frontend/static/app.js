@@ -288,7 +288,10 @@ function renderHRDashboard() {
         <div class="table-container">
           <div class="table-header">
             <span class="table-title">📋 Tüm Adaylar</span>
-            <button class="btn btn-outline" onclick="loadHRCVs()" style="padding:8px 16px;font-size:13px">↻ Yenile</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+              <button class="btn btn-primary" onclick="openEmailCvPlugin()" style="width:auto;padding:8px 16px;font-size:13px">Mailden CV tara</button>
+              <button class="btn btn-outline" onclick="loadHRCVs()" style="padding:8px 16px;font-size:13px">↻ Yenile</button>
+            </div>
           </div>
           <div id="hr-table-body">
             <div class="loading-overlay"><span class="spinner"></span> CV'ler yükleniyor...</div>
@@ -588,6 +591,125 @@ function markdownToHtml(md) {
   html = html.replace(/\n/g, '<br>');
   return html;
 }
+
+let emailCvItems = [];
+let emailCvError = '';
+let emailCvLoading = false;
+let emailCvSavingId = null;
+
+window.openEmailCvPlugin = function() {
+  emailCvError = '';
+  renderEmailCvModal();
+  window.scanEmailCVs();
+};
+
+window.closeEmailCvPlugin = function() {
+  const overlay = document.getElementById('email-cv-overlay');
+  if (overlay) overlay.remove();
+};
+
+function renderEmailCvModal() {
+  const existing = document.getElementById('email-cv-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'email-cv-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) window.closeEmailCvPlugin(); };
+
+  const rows = emailCvItems.map(item => {
+    const percent = Math.round((item.score || 0) * 100);
+    const isSaved = item.status === 'saved' || item.saved_job_id;
+    const isFailed = item.status === 'failed';
+    const saveDisabled = isSaved || isFailed || emailCvSavingId === item.pending_id;
+    const saveLabel = isSaved ? 'Kaydedildi' : (emailCvSavingId === item.pending_id ? 'Kaydediliyor...' : 'Kaydet');
+    return `
+      <div class="email-cv-row">
+        <div class="email-cv-main">
+          <strong>${escapeHtml(item.candidate_name || 'Bilinmiyor')}</strong>
+          <span>${escapeHtml(item.file_name || '')}</span>
+          <small>${escapeHtml(item.email_sender || '')} - ${escapeHtml(item.email_subject || '')}</small>
+          ${item.error ? `<small class="email-cv-error">${escapeHtml(item.error)}</small>` : ''}
+        </div>
+        <div class="email-cv-actions">
+          <span class="email-cv-score ${percent >= 70 ? 'score-high' : percent >= 40 ? 'score-mid' : 'score-low'}">${percent}/100</span>
+          <button class="btn btn-primary" style="width:auto;padding:8px 14px;font-size:12px" onclick="saveEmailCV('${item.pending_id}')" ${saveDisabled ? 'disabled' : ''}>${saveLabel}</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  overlay.innerHTML = `
+    <div class="modal email-cv-modal">
+      <button class="modal-close" onclick="closeEmailCvPlugin()">×</button>
+      <div class="modal-header-section">
+        <h3>Mailden gelen CV'ler</h3>
+        <p style="color:var(--text-secondary);font-size:13px;margin-top:6px">
+          PDF ekleri once puanlanir; sadece Kaydet dediginiz adaylar veritabanina eklenir.
+        </p>
+      </div>
+
+      <div class="email-cv-toolbar">
+        <button class="btn btn-primary" style="width:auto" onclick="scanEmailCVs()" ${emailCvLoading ? 'disabled' : ''}>
+          ${emailCvLoading ? '<span class="spinner"></span> Taraniyor...' : 'Tekrar tara'}
+        </button>
+      </div>
+
+      ${emailCvError ? `<div class="alert alert-error">${escapeHtml(emailCvError)}</div>` : ''}
+      ${emailCvLoading && !emailCvItems.length ? '<div class="loading-overlay"><span class="spinner"></span> Mail kutusu taraniyor...</div>' : ''}
+      ${!emailCvLoading && !emailCvError && !emailCvItems.length ? '<div class="empty-state"><h3>Kaydedilecek CV bulunamadi</h3><p>IMAP aramasinda PDF eki olan yeni mail yok.</p></div>' : ''}
+      ${rows ? `<div class="email-cv-list">${rows}</div>` : ''}
+    </div>`;
+
+  document.body.appendChild(overlay);
+}
+
+window.scanEmailCVs = async function() {
+  emailCvLoading = true;
+  emailCvError = '';
+  renderEmailCvModal();
+
+  try {
+    const res = await fetch(`${API}/email-cv/scan`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit: 10 })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Mail CV taramasi basarisiz');
+    emailCvItems = data.items || [];
+  } catch (err) {
+    emailCvError = err.message;
+  } finally {
+    emailCvLoading = false;
+    renderEmailCvModal();
+  }
+};
+
+window.saveEmailCV = async function(pendingId) {
+  emailCvSavingId = pendingId;
+  renderEmailCvModal();
+
+  try {
+    const res = await fetch(`${API}/email-cv/pending/${pendingId}/save`, {
+      method: 'POST',
+      headers: authHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'CV kaydedilemedi');
+
+    emailCvItems = emailCvItems.map(item =>
+      item.pending_id === pendingId
+        ? { ...item, status: 'saved', saved_job_id: data.cv_id }
+        : item
+    );
+    loadHRCVs();
+  } catch (err) {
+    emailCvError = err.message;
+  } finally {
+    emailCvSavingId = null;
+    renderEmailCvModal();
+  }
+};
 
 window.loadHRCVs = async function() {
   try {

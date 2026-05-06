@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
 
+    # Email CV plugin (IMAP)
+    EMAIL_CV_IMAP_HOST: str = ""
+    EMAIL_CV_IMAP_PORT: int = 993
+    EMAIL_CV_IMAP_USE_SSL: bool = True
+    EMAIL_CV_IMAP_USERNAME: str = ""
+    EMAIL_CV_IMAP_PASSWORD: str = ""
+    EMAIL_CV_IMAP_MAILBOX: str = "INBOX"
+    EMAIL_CV_IMAP_SEARCH: str = "UNSEEN"
+
     @property
     def max_upload_bytes(self) -> int:
         return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
