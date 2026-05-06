@@ -1,0 +1,9 @@
+[project]
+name = "recruitai-monorepo"
+version = "0.1.0"
+description = "RecruitAI Sprint 0 monorepo foundation"
+requires-python = ">=3.11"
+
+[tool.recruitai.workspace]
+apps = ["apps/api", "apps/dashboard"]
+packages = ["packages/ai_engine"]
