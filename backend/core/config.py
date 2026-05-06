@@ -40,8 +40,12 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     QUEUE_NAME: str = "cv_parse_jobs"
 
-    # ── Database (placeholder for Sprint 2+) ───────────────────────────
-    DATABASE_URL: str = "postgresql+asyncpg://recruit:recruit@localhost:5432/recruitai"
+    # ── Database ───────────────────────────────────────────────────────────────
+    DATABASE_URL: str = "sqlite+aiosqlite:///./recruitai.db"
+
+    # ── Auth ───────────────────────────────────────────────────────────────────
+    SECRET_KEY: str = "dev_secret_key_123"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 
     # ── Parser ─────────────────────────────────────────────────────────
     PARSER_OCR_ENABLED: bool = True
@@ -49,6 +53,10 @@ class Settings(BaseSettings):
     PARSER_OCR_TIMEOUT: int = 30           # v2.0: per-page OCR timeout (seconds)
     PARSER_PARSE_TIMEOUT: int = 120        # v2.0: overall parse timeout (seconds)
     BATCH_CONCURRENT_LIMIT: int = 10       # v2.0: max files in a batch upload
+
+    # ── AI / LLM ───────────────────────────────────────────────────────────────
+    GEMINI_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
 
     @property
     def max_upload_bytes(self) -> int:

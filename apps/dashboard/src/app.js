@@ -1,277 +1,220 @@
-// Frontend Sprint 1: Recruiter Workflow
+const API_BASE = "http://127.0.0.1:8000/api/v1";
 
-const DEFAULT_CREDENTIALS = {
-  email: "recruiter@recruitai.local",
-  password: "demo1234",
-  role: "recruiter",
+let state = {
+  session: null,
+  activeView: "login", // 'login', 'register', 'dashboard'
+  selectedFile: null,
+  error: null,
+  processing: null,
+  history: [], // For HR: all CVs, For Candidate: their own CVs (if we implement it)
 };
 
-const PROCESSING_UPDATES = [
-  ["Parsing", 32, { overall: 58, contact: 72, experience: 45, skills: 54, education: 51, confidence: "Low" }],
-  ["Normalizing", 58, { overall: 76, contact: 86, experience: 69, skills: 78, education: 71, confidence: "Medium" }],
-  ["Quality Check", 84, { overall: 87, contact: 94, experience: 82, skills: 89, education: 83, confidence: "High" }],
-  ["Ready", 100, { overall: 89, contact: 95, experience: 84, skills: 91, education: 86, confidence: "High" }],
-];
+const root = document.querySelector("#app");
 
-function createInitialState() {
-  return {
-    session: null,
-    activeView: "login",
-    selectedFile: null,
-    error: null,
-    processing: null,
-    history: [
-      {
-        id: "cv-1842",
-        fileName: "ayse-yilmaz-ai-engineer.pdf",
-        status: "Ready",
-        progress: 100,
-        uploadedAt: "09:42",
-        parseQuality: {
-          overall: 91,
-          contact: 96,
-          experience: 88,
-          skills: 93,
-          education: 86,
-          confidence: "High",
-        },
-      },
-      {
-        id: "cv-1839",
-        fileName: "mehmet-kaya-frontend.pdf",
-        status: "Needs Review",
-        progress: 100,
-        uploadedAt: "09:18",
-        parseQuality: {
-          overall: 74,
-          contact: 83,
-          experience: 69,
-          skills: 76,
-          education: 68,
-          confidence: "Medium",
-        },
-      },
-    ],
-  };
-}
-
-function authenticate(credentials, authService = defaultAuthService) {
-  return authService.login(credentials);
-}
-
-const defaultAuthService = {
-  login(credentials) {
-    const email = String(credentials.email || "").trim().toLowerCase();
-    const password = String(credentials.password || "");
-    const role = String(credentials.role || "");
-
-    if (!email || !password) {
-      return { ok: false, message: "Email and password are required." };
+function render() {
+  if (!root) return;
+  if (!state.session) {
+    if (state.activeView === "register") {
+      root.innerHTML = registerView(state);
+      bindRegister();
+    } else {
+      root.innerHTML = loginView(state);
+      bindLogin();
     }
-    if (role !== DEFAULT_CREDENTIALS.role) {
-      return { ok: false, message: "Only Recruiter role is enabled for Sprint 1." };
-    }
-    if (email !== DEFAULT_CREDENTIALS.email || password !== DEFAULT_CREDENTIALS.password) {
-      return { ok: false, message: "Invalid recruiter credentials." };
-    }
-    return {
-      ok: true,
-      session: {
-        email,
-        role,
-      },
-    };
-  },
-};
-
-function validatePdfFile(file, maxSizeBytes = 10 * 1024 * 1024) {
-  if (!file) {
-    return { valid: false, message: "Please select a PDF CV." };
+    return;
   }
 
-  const fileName = String(file.name || "");
-  const mimeType = String(file.type || "");
-  const isPdf = fileName.toLowerCase().endsWith(".pdf") || mimeType === "application/pdf";
-
-  if (!isPdf) {
-    return { valid: false, message: "Please upload a PDF CV." };
-  }
-  if (Number(file.size || 0) > maxSizeBytes) {
-    return { valid: false, message: "PDF CV must be 10MB or smaller." };
-  }
-  return { valid: true, message: "" };
+  root.innerHTML = dashboardView(state);
+  bindDashboard();
 }
 
-function createRecruiterWorkflow(options = {}) {
-  const root = options.root || (typeof document !== "undefined" ? document.querySelector("#app") : null);
-  const authService = options.authService || defaultAuthService;
-  const timerApi = options.timerApi || (typeof window !== "undefined" ? window : globalThis);
-  const clock = options.clock || (() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-  const state = options.state || createInitialState();
+async function apiCall(endpoint, method = "GET", body = null) {
+  const headers = {};
+  if (state.session && state.session.token) {
+    headers["Authorization"] = `Bearer ${state.session.token}`;
+  }
 
-  const controller = {
-    state,
-    root,
-    render() {
-      if (!root) return;
-      if (!state.session) {
-        root.innerHTML = loginView(state);
-        this.bindLogin();
-        return;
-      }
+  let options = { method, headers };
+  
+  if (body) {
+    if (body instanceof FormData) {
+      options.body = body;
+    } else if (body instanceof URLSearchParams) {
+        options.body = body;
+        headers["Content-Type"] = "application/x-www-form-urlencoded";
+    } else {
+      headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(body);
+    }
+  }
 
-      root.innerHTML = dashboardView(state);
-      this.bindDashboard();
-    },
-    bindLogin() {
-      const form = root.querySelector("#loginForm");
-      if (!form) return;
-      form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        this.handleLogin({
-          email: root.querySelector("#email").value,
-          password: root.querySelector("#password").value,
-          role: root.querySelector("#role").value,
-        });
-      });
-    },
-    bindDashboard() {
-      const logoutButton = root.querySelector("#logoutButton");
-      if (logoutButton) {
-        logoutButton.addEventListener("click", () => this.logout());
-      }
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`, options);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: "Unknown error" }));
+      throw new Error(err.detail || "API request failed");
+    }
+    return await response.json();
+  } catch (err) {
+    state.error = err.message;
+    render();
+    throw err;
+  }
+}
 
-      const input = root.querySelector("#fileInput");
-      if (input) {
-        input.addEventListener("change", () => this.selectFile(input.files[0]));
-      }
+function bindLogin() {
+  const form = root.querySelector("#loginForm");
+  if (!form) return;
+  
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    state.error = null;
+    render(); // Clear previous error
+    
+    const formData = new URLSearchParams();
+    formData.append("username", document.querySelector("#email").value);
+    formData.append("password", document.querySelector("#password").value);
 
-      const dropZone = root.querySelector("#dropZone");
-      if (dropZone) {
-        dropZone.addEventListener("dragover", (event) => {
-          event.preventDefault();
-          dropZone.classList.add("dragging");
-        });
-        dropZone.addEventListener("dragleave", () => {
-          dropZone.classList.remove("dragging");
-        });
-        dropZone.addEventListener("drop", (event) => {
-          event.preventDefault();
-          dropZone.classList.remove("dragging");
-          this.selectFile(event.dataTransfer.files[0]);
-        });
-      }
-
-      const startButton = root.querySelector("#startProcessing");
-      if (startButton) {
-        startButton.addEventListener("click", () => {
-          if (state.selectedFile) {
-            this.startProcessing(state.selectedFile);
-          }
-        });
-      }
-    },
-    handleLogin(credentials) {
-      const result = authenticate(credentials, authService);
-      if (!result.ok) {
-        state.error = result.message;
-        this.render();
-        return false;
-      }
-
-      state.session = result.session;
-      state.error = null;
-      state.activeView = "dashboard";
-      this.render();
-      return true;
-    },
-    logout() {
-      state.session = null;
-      state.selectedFile = null;
-      state.error = null;
-      state.activeView = "login";
-      this.render();
-    },
-    selectFile(file) {
-      const result = validatePdfFile(file);
-      if (!result.valid) {
-        state.error = result.message;
-        state.selectedFile = null;
-        this.render();
-        return false;
-      }
-
-      state.selectedFile = file;
-      state.error = null;
-      this.render();
-      return true;
-    },
-    startProcessing(file) {
-      const result = validatePdfFile(file);
-      if (!result.valid) {
-        state.error = result.message;
-        this.render();
-        return false;
-      }
-
-      state.processing = {
-        id: `cv-${Date.now()}`,
-        fileName: file.name,
-        status: "Queued",
-        progress: 8,
-        uploadedAt: clock(),
-        parseQuality: {
-          overall: 42,
-          contact: 48,
-          experience: 36,
-          skills: 44,
-          education: 40,
-          confidence: "Calculating",
-        },
-      };
-      state.selectedFile = null;
-      state.error = null;
-      this.render();
-
-      PROCESSING_UPDATES.forEach(([status, progress, quality], index) => {
-        timerApi.setTimeout(() => {
-          if (!state.processing) return;
-          state.processing.status = status;
-          state.processing.progress = progress;
-          state.processing.parseQuality = quality;
-          this.render();
-        }, (index + 1) * 900);
-      });
-      return true;
-    },
-    seedDemoFromQuery(search) {
-      const params = new URLSearchParams(search || (typeof window !== "undefined" ? window.location.search : ""));
-      if (params.get("demo") !== "ready") return false;
-
+    try {
+      const data = await apiCall("/auth/login", "POST", formData);
       state.session = {
-        email: DEFAULT_CREDENTIALS.email,
-        role: DEFAULT_CREDENTIALS.role,
+        token: data.access_token,
+        user: data.user
       };
-      state.processing = {
-        id: "cv-demo-ready",
-        fileName: "demo-senior-ai-engineer.pdf",
-        status: "Ready",
-        progress: 100,
-        uploadedAt: clock(),
-        parseQuality: {
-          overall: 89,
-          contact: 95,
-          experience: 84,
-          skills: 91,
-          education: 86,
-          confidence: "High",
-        },
-      };
-      return true;
-    },
-  };
+      state.activeView = "dashboard";
+      if (data.user.role === "hr") {
+        fetchCVs();
+      }
+      render();
+    } catch (e) {
+      console.error(e);
+    }
+  });
 
-  return controller;
+  const btnRegister = root.querySelector("#btnGoRegister");
+  if (btnRegister) {
+    btnRegister.addEventListener("click", () => {
+      state.activeView = "register";
+      state.error = null;
+      render();
+    });
+  }
+}
+
+function bindRegister() {
+  const form = root.querySelector("#registerForm");
+  if (!form) return;
+  
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    state.error = null;
+    
+    const payload = {
+      email: document.querySelector("#email").value,
+      password: document.querySelector("#password").value,
+      role: document.querySelector("#role").value
+    };
+
+    try {
+      await apiCall("/auth/register", "POST", payload);
+      state.activeView = "login";
+      state.error = "Kayıt başarılı, lütfen giriş yapın."; // Use error bar for success msg briefly
+      render();
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+  const btnLogin = root.querySelector("#btnGoLogin");
+  if (btnLogin) {
+    btnLogin.addEventListener("click", () => {
+      state.activeView = "login";
+      state.error = null;
+      render();
+    });
+  }
+}
+
+function bindDashboard() {
+  const logoutButton = root.querySelector("#logoutButton");
+  if (logoutButton) {
+    logoutButton.addEventListener("click", () => {
+      state.session = null;
+      state.history = [];
+      state.processing = null;
+      state.activeView = "login";
+      render();
+    });
+  }
+
+  if (state.session.user.role === "candidate") {
+    const input = root.querySelector("#fileInput");
+    if (input) {
+      input.addEventListener("change", () => {
+        state.selectedFile = input.files[0];
+        render();
+      });
+    }
+
+    const startButton = root.querySelector("#startProcessing");
+    if (startButton) {
+      startButton.addEventListener("click", async () => {
+        if (state.selectedFile) {
+          const formData = new FormData();
+          formData.append("file", state.selectedFile);
+          
+          state.processing = {
+             status: "Queued",
+             fileName: state.selectedFile.name,
+             progress: 10
+          };
+          render();
+
+          try {
+            const result = await apiCall("/upload", "POST", formData);
+            pollJob(result.job_id);
+          } catch (e) {
+            console.error(e);
+            state.processing = null;
+            render();
+          }
+        }
+      });
+    }
+  }
+}
+
+async function pollJob(job_id) {
+  try {
+    const job = await apiCall(`/jobs/${job_id}`);
+    state.processing = {
+      id: job.job_id,
+      fileName: job.filename,
+      status: job.status,
+      confidenceScore: job.confidence_score,
+      progress: job.status === "completed" ? 100 : (job.status === "processing" ? 50 : 20),
+      parseQuality: job.parsed_result ? job.parsed_result.parse_quality : null,
+      uploadedAt: job.created_at
+    };
+    
+    render();
+
+    if (job.status !== "completed" && job.status !== "failed") {
+      setTimeout(() => pollJob(job_id), 2000);
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function fetchCVs() {
+  try {
+    const cvs = await apiCall("/cvs");
+    state.history = cvs;
+    render();
+  } catch (e) {
+    console.error(e);
+  }
 }
 
 function loginView(state) {
@@ -280,48 +223,77 @@ function loginView(state) {
       <div class="brand-panel">
         <div class="brand-mark">RA</div>
         <h1>RecruitAI</h1>
-        <p>CV upload, parsing status, and quality monitoring for recruiter review.</p>
-        <div class="metric-strip">
-          <span><strong>50%</strong> workload target</span>
-          <span><strong>90%</strong> parse quality goal</span>
-        </div>
+        <p>Adaylar için CV yükleme, İK için otomatik ön eleme.</p>
       </div>
 
       <form class="login-card" id="loginForm">
         <div>
-          <p class="eyebrow">Recruiter Access</p>
-          <h2>Sign in</h2>
+          <h2>Giriş Yap</h2>
         </div>
 
         ${state.error ? `<p class="error-banner" role="alert">${escapeHtml(state.error)}</p>` : ""}
 
         <label>
           Email
-          <input id="email" type="email" value="recruiter@recruitai.local" autocomplete="email" required>
+          <input id="email" type="email" required>
         </label>
 
         <label>
-          Password
-          <input id="password" type="password" value="demo1234" autocomplete="current-password" required>
+          Şifre
+          <input id="password" type="password" required>
+        </label>
+
+        <button type="submit" class="primary-action">Giriş</button>
+        <button type="button" id="btnGoRegister" style="background:none; border:none; color:var(--primary); text-decoration:underline;">Hesabınız yok mu? Kayıt Olun</button>
+      </form>
+    </section>
+  `;
+}
+
+function registerView(state) {
+  return `
+    <section class="login-layout">
+      <div class="brand-panel">
+        <div class="brand-mark">RA</div>
+        <h1>RecruitAI</h1>
+        <p>Adaylar için CV yükleme, İK için otomatik ön eleme.</p>
+      </div>
+
+      <form class="login-card" id="registerForm">
+        <div>
+          <h2>Kayıt Ol</h2>
+        </div>
+
+        ${state.error ? `<p class="error-banner" role="alert">${escapeHtml(state.error)}</p>` : ""}
+
+        <label>
+          Email
+          <input id="email" type="email" required>
         </label>
 
         <label>
-          Role
+          Şifre
+          <input id="password" type="password" required>
+        </label>
+
+        <label>
+          Rol
           <select id="role">
-            <option value="recruiter">Recruiter</option>
-            <option value="viewer">Viewer</option>
+            <option value="candidate">Aday (Sadece CV Yükler)</option>
+            <option value="hr">İnsan Kaynakları</option>
           </select>
         </label>
 
-        <button type="submit" class="primary-action">Continue</button>
-        <p class="form-note">Role-based routing is mocked for Sprint 1 and ready for API integration.</p>
+        <button type="submit" class="primary-action">Kayıt Ol</button>
+        <button type="button" id="btnGoLogin" style="background:none; border:none; color:var(--primary); text-decoration:underline;">Zaten hesabınız var mı? Giriş Yapın</button>
       </form>
     </section>
   `;
 }
 
 function dashboardView(state) {
-  const active = state.processing || state.history[0];
+  const isHR = state.session.user.role === "hr";
+  
   return `
     <section class="dashboard-layout">
       <aside class="sidebar">
@@ -329,158 +301,98 @@ function dashboardView(state) {
           <div class="brand-mark compact">RA</div>
           <div>
             <strong>RecruitAI</strong>
-            <span>Recruiter Console</span>
+            <span>${isHR ? "IK Paneli" : "Aday Paneli"}</span>
           </div>
         </div>
-        <nav class="nav-list" aria-label="Dashboard sections">
-          <button class="nav-item active" type="button">Upload Flow</button>
-          <button class="nav-item" type="button">Processing</button>
-          <button class="nav-item" type="button">Quality</button>
-        </nav>
         <div class="user-card">
-          <span>${escapeHtml(state.session.email)}</span>
-          <strong>${capitalize(state.session.role)}</strong>
-          <button id="logoutButton" type="button">Sign out</button>
+          <span>${escapeHtml(state.session.user.email)}</span>
+          <strong>${isHR ? "İnsan Kaynakları" : "Aday"}</strong>
+          <button id="logoutButton" type="button">Çıkış Yap</button>
         </div>
       </aside>
 
       <section class="content">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Sprint 1 Workflow</p>
-            <h1>CV Intake and Parsing Monitor</h1>
+            <h1>${isHR ? "Tüm CV'ler ve Puanlar" : "CV Yükle"}</h1>
           </div>
-          <span class="role-pill">Recruiter</span>
         </header>
 
         ${state.error ? `<p class="error-banner" role="alert">${escapeHtml(state.error)}</p>` : ""}
 
-        <section class="workflow-grid">
-          ${uploadPanel(state)}
-          ${statusPanel(active)}
-          ${qualityPanel(active)}
-        </section>
-
-        ${historyPanel(state)}
+        ${isHR ? hrPanel(state) : candidatePanel(state)}
       </section>
     </section>
   `;
 }
 
-function uploadPanel(state) {
-  const selectedName = state.selectedFile ? state.selectedFile.name : "No PDF selected";
+function candidatePanel(state) {
+  const selectedName = state.selectedFile ? state.selectedFile.name : "PDF Seçilmedi";
+  
+  let statusHtml = "";
+  if (state.processing) {
+    statusHtml = `
+      <article class="panel status-panel" style="margin-top: 20px;">
+        <div class="panel-heading">
+          <h2>İşlem Durumu: ${escapeHtml(state.processing.status)}</h2>
+        </div>
+        <div class="progress-track" aria-label="Processing progress">
+          <span style="width: ${state.processing.progress}%"></span>
+        </div>
+        ${state.processing.status === "completed" ? `
+          <div class="quality-score">
+            <span>${Math.round(state.processing.confidenceScore * 100) || 0}%</span>
+            <div><strong>Başarı Puanı</strong></div>
+          </div>
+        ` : ""}
+      </article>
+    `;
+  }
+
   return `
     <article class="panel upload-panel">
       <div class="panel-heading">
-        <p class="eyebrow">Step 1</p>
-        <h2>Upload CV</h2>
+        <h2>CV Yükle</h2>
       </div>
 
       <label class="drop-zone" id="dropZone">
         <input id="fileInput" type="file" accept="application/pdf,.pdf">
         <span class="upload-icon">PDF</span>
         <strong>${escapeHtml(selectedName)}</strong>
-        <small>Drop a PDF here or browse from your device.</small>
+        <small>PDF dosyasını buraya sürükleyin veya seçin.</small>
       </label>
 
       <button id="startProcessing" class="primary-action" type="button" ${state.selectedFile ? "" : "disabled"}>
-        Start parsing
+        Yükle ve Analiz Et
       </button>
     </article>
+    ${statusHtml}
   `;
 }
 
-function statusPanel(item) {
-  const steps = ["Queued", "Parsing", "Normalizing", "Quality Check", "Ready"];
-  const currentIndex = Math.max(0, steps.indexOf(item.status));
-  const progress = item.progress || 0;
-  return `
-    <article class="panel status-panel">
-      <div class="panel-heading">
-        <p class="eyebrow">Step 2</p>
-        <h2>Processing Status</h2>
-      </div>
-
-      <div class="status-summary">
-        <span class="status-badge ${statusClass(item.status)}">${escapeHtml(item.status)}</span>
-        <strong>${escapeHtml(item.fileName)}</strong>
-        <small>Uploaded ${escapeHtml(item.uploadedAt)}</small>
-      </div>
-
-      <div class="progress-track" aria-label="Processing progress">
-        <span style="width: ${progress}%"></span>
-      </div>
-
-      <ol class="step-list">
-        ${steps
-          .map((step, index) => {
-            const stateClass = index < currentIndex ? "done" : index === currentIndex ? "current" : "";
-            return `<li class="${stateClass}"><span>${index + 1}</span>${step}</li>`;
-          })
-          .join("")}
-      </ol>
-    </article>
-  `;
-}
-
-function qualityPanel(item) {
-  const quality = item.parseQuality;
-  return `
-    <article class="panel quality-panel">
-      <div class="panel-heading">
-        <p class="eyebrow">Step 3</p>
-        <h2>Parse Quality</h2>
-      </div>
-
-      <div class="quality-score">
-        <span>${quality.overall}</span>
-        <div>
-          <strong>${escapeHtml(quality.confidence)} confidence</strong>
-          <small>Weighted extraction quality</small>
-        </div>
-      </div>
-
-      <div class="quality-bars">
-        ${qualityMetric("Contact", quality.contact)}
-        ${qualityMetric("Experience", quality.experience)}
-        ${qualityMetric("Skills", quality.skills)}
-        ${qualityMetric("Education", quality.education)}
-      </div>
-    </article>
-  `;
-}
-
-function historyPanel(state) {
-  const rows = [state.processing, ...state.history].filter(Boolean);
+function hrPanel(state) {
   return `
     <section class="history-section">
-      <div class="section-heading">
-        <h2>Recent CV Jobs</h2>
-        <span>${rows.length} records</span>
-      </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>File</th>
-              <th>Status</th>
-              <th>Quality</th>
-              <th>Uploaded</th>
+              <th>Dosya Adı</th>
+              <th>Durum</th>
+              <th>Puan (0-100)</th>
+              <th>Yüklenme Tarihi</th>
             </tr>
           </thead>
           <tbody>
-            ${rows
-              .map(
-                (row) => `
-                  <tr>
-                    <td>${escapeHtml(row.fileName)}</td>
-                    <td><span class="status-badge ${statusClass(row.status)}">${escapeHtml(row.status)}</span></td>
-                    <td>${row.parseQuality.overall}%</td>
-                    <td>${escapeHtml(row.uploadedAt)}</td>
-                  </tr>
-                `
-              )
-              .join("")}
+            ${state.history.map(row => `
+              <tr>
+                <td>${escapeHtml(row.file_name)}</td>
+                <td><span class="status-badge ${statusClass(row.status)}">${escapeHtml(row.status)}</span></td>
+                <td><strong>${row.overall_score ? Math.round(row.overall_score * 100) : "-"}</strong></td>
+                <td>${new Date(row.uploaded_at).toLocaleString()}</td>
+              </tr>
+            `).join("")}
+            ${state.history.length === 0 ? '<tr><td colspan="4">Henüz CV yüklenmemiş.</td></tr>' : ''}
           </tbody>
         </table>
       </div>
@@ -488,24 +400,8 @@ function historyPanel(state) {
   `;
 }
 
-function qualityMetric(label, value) {
-  return `
-    <div class="quality-row">
-      <div>
-        <span>${label}</span>
-        <strong>${value}%</strong>
-      </div>
-      <div class="mini-track"><span style="width: ${value}%"></span></div>
-    </div>
-  `;
-}
-
 function statusClass(status) {
-  return status.toLowerCase().replace(/\s+/g, "-");
-}
-
-function capitalize(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return String(status).toLowerCase().replace(/\s+/g, "-");
 }
 
 function escapeHtml(value) {
@@ -517,24 +413,5 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-/* istanbul ignore next */
-if (typeof module !== "undefined") {
-  module.exports = {
-    PROCESSING_UPDATES,
-    authenticate,
-    createInitialState,
-    createRecruiterWorkflow,
-    defaultAuthService,
-    escapeHtml,
-    statusClass,
-    validatePdfFile,
-  };
-}
-
-/* istanbul ignore next */
-if (typeof module === "undefined") {
-  const app = document.querySelector("#app");
-  const workflow = createRecruiterWorkflow({ root: app });
-  workflow.seedDemoFromQuery();
-  workflow.render();
-}
+// Initial Render
+render();

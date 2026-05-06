@@ -18,12 +18,17 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, status, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from backend.core.config import get_settings
 from backend.core.storage import StorageService, StorageError
 from backend.core.worker import CVParseWorker, JobStore, JobStatus, ParseJob
+from backend.core.database import get_db
+from backend.core.models import CV, User
+from backend.api.auth import get_current_user
 from backend.cv_parser import PDFCVParser, ParserConfig
 
 logger = logging.getLogger("recruitai.api.upload")
@@ -117,6 +122,8 @@ async def _run_parse_job(job_id: str) -> None:
 async def upload_single(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="PDF formatında CV dosyası"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> UploadResponse:
     """Upload a single PDF CV and enqueue it for parsing."""
     _validate_pdf(file)
@@ -144,8 +151,18 @@ async def upload_single(
             detail=f"Dosya kaydedilemedi: {exc}",
         )
 
-    # Create job record
+    # Create job record in memory store
     _job_store.create(job_id, file.filename or "upload.pdf")  # type: ignore[union-attr]
+
+    # Create CV record in database
+    cv_record = CV(
+        id=job_id,
+        user_id=current_user.id,
+        file_name=file.filename or "upload.pdf",
+        status=JobStatus.PENDING.value
+    )
+    db.add(cv_record)
+    await db.commit()
 
     # Enqueue background parse
     await _enqueue_parse(job_id, background_tasks)
@@ -169,6 +186,8 @@ async def upload_single(
 async def upload_batch(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(..., description="PDF formatında CV dosyaları"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> BatchUploadResponse:
     """Upload multiple PDF CVs and enqueue them for parsing."""
     if not files:
@@ -215,6 +234,16 @@ async def upload_batch(
 
             job_id = _storage.save_upload(content, file.filename or "upload.pdf")  # type: ignore[union-attr]
             _job_store.create(job_id, file.filename or "upload.pdf")  # type: ignore[union-attr]
+
+            # Create CV record in database
+            cv_record = CV(
+                id=job_id,
+                user_id=current_user.id,
+                file_name=file.filename or "upload.pdf",
+                status=JobStatus.PENDING.value
+            )
+            db.add(cv_record)
+            
             await _enqueue_parse(job_id, background_tasks)
 
             jobs.append(UploadResponse(
@@ -240,6 +269,7 @@ async def upload_batch(
                 message=f"Hata: {exc}",
             ))
 
+    await db.commit()
     logger.info("Batch upload: %d files, %d accepted", len(files), sum(1 for j in jobs if j.job_id))
     return BatchUploadResponse(total=len(jobs), jobs=jobs)
 
@@ -247,10 +277,20 @@ async def upload_batch(
 @router.get(
     "/jobs",
     response_model=List[JobStatusResponse],
-    summary="Tüm parse işlemlerini listele",
+    summary="Kullanıcının kendi CV parse işlemlerini listele",
 )
-async def list_jobs() -> List[JobStatusResponse]:
-    """List all parse jobs with their current status."""
+async def list_jobs(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> List[JobStatusResponse]:
+    """List only the current user's own parse jobs."""
+    result = await db.execute(
+        select(CV).where(CV.user_id == current_user.id).order_by(CV.uploaded_at.desc())
+    )
+    user_cvs = result.scalars().all()
+    user_job_ids = {cv.id for cv in user_cvs}
+
+    is_hr = current_user.role == "hr"
     jobs = _job_store.list_all()  # type: ignore[union-attr]
     return [
         JobStatusResponse(
@@ -261,10 +301,11 @@ async def list_jobs() -> List[JobStatusResponse]:
             started_at=j.started_at,
             completed_at=j.completed_at,
             duration_ms=j.duration_ms,
-            confidence_score=j.confidence_score,
+            confidence_score=j.confidence_score if is_hr else 0.0,
             error=j.error,
         )
         for j in jobs
+        if j.job_id in user_job_ids
     ]
 
 
@@ -273,8 +314,21 @@ async def list_jobs() -> List[JobStatusResponse]:
     response_model=JobStatusResponse,
     summary="Belirli bir parse işleminin durumunu sorgula",
 )
-async def get_job_status(job_id: str) -> JobStatusResponse:
-    """Get the status and parsed result for a specific job."""
+async def get_job_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> JobStatusResponse:
+    """Get the status and parsed result for a specific job (only if owned by current user)."""
+    # Verify ownership
+    result = await db.execute(select(CV).where(CV.id == job_id, CV.user_id == current_user.id))
+    cv_record = result.scalars().first()
+    if cv_record is None and current_user.role != "hr":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="İş bulunamadı veya erişim yetkiniz yok.",
+        )
+
     job = _job_store.get(job_id)  # type: ignore[union-attr]
     if job is None:
         raise HTTPException(
@@ -282,8 +336,10 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
             detail=f"İş bulunamadı: {job_id}",
         )
 
+    is_hr = current_user.role == "hr"
+
     parsed_result = None
-    if job.status == JobStatus.COMPLETED:
+    if job.status == JobStatus.COMPLETED and is_hr:
         parsed_result = _storage.get_parsed_result(job_id)  # type: ignore[union-attr]
 
     return JobStatusResponse(
@@ -294,7 +350,52 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         started_at=job.started_at,
         completed_at=job.completed_at,
         duration_ms=job.duration_ms,
-        confidence_score=job.confidence_score,
+        confidence_score=job.confidence_score if is_hr else 0.0,
         error=job.error,
         parsed_result=parsed_result,
     )
+
+
+@router.get("/cvs", summary="Insan Kaynaklari icin tum CV'leri listele")
+async def list_all_cvs_for_hr(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    HR endpoint: list all CVs from the database.
+    """
+    if current_user.role != "hr":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sadece Insan Kaynaklari erisebilir.")
+    
+    result = await db.execute(select(CV).order_by(CV.uploaded_at.desc()))
+    cvs = result.scalars().all()
+    
+    import json as _json
+
+    results = []
+    for cv in cvs:
+        # Extract skills and contact from parse_quality JSON
+        skills = []
+        contact = {}
+        if cv.parse_quality:
+            try:
+                pq = _json.loads(cv.parse_quality) if isinstance(cv.parse_quality, str) else cv.parse_quality
+                skills = pq.get("skills", [])
+                contact = pq.get("contact", {})
+            except Exception:
+                pass
+
+        results.append({
+            "id": cv.id,
+            "user_id": cv.user_id,
+            "file_name": cv.file_name,
+            "candidate_name": cv.candidate_name or "Bilinmiyor",
+            "status": cv.status,
+            "overall_score": cv.overall_score,
+            "uploaded_at": cv.uploaded_at,
+            "skills": skills,
+            "contact": contact,
+            "parse_quality": cv.parse_quality
+        })
+
+    return results

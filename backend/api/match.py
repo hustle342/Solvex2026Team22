@@ -1,10 +1,12 @@
-﻿# Optimized by Skills Agent for RecruitAI
+# Optimized by Skills Agent for RecruitAI
 # FastAPI Endpoint for Matching Engine
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from pydantic import BaseModel
 from backend.matching.schemas import JobDescription, Candidate, MatchResult
 from backend.matching.engine import Matcher
+from backend.core.models import User
+from backend.api.auth import get_current_user
 
 router = APIRouter(tags=["matching"])
 # Instantiate a global matcher with default weights.
@@ -26,7 +28,9 @@ class MatchResponse(BaseModel):
     summary="Adayları İş İlanı (JD) ile eşleştir ve sırala",
     description="Verilen bir iş ilanı gereksinimleri ile aday listesini karşılaştırır, ağırlıklı puanlarını hesaplar ve precision açısından sıralı bir liste döner."
 )
-async def match_candidates(request: MatchRequest) -> MatchResponse:
+async def match_candidates(request: MatchRequest, current_user: User = Depends(get_current_user)) -> MatchResponse:
+    if current_user.role != "hr":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sadece İK kullanıcıları eşleştirme yapabilir.")
     """Evaluate and rank candidates against the provided job description."""
     if not request.candidates:
         raise HTTPException(status_code=400, detail="Aday listesi boş olamaz. / Candidate list cannot be empty.")

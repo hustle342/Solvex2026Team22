@@ -19,10 +19,15 @@ import asyncio
 import logging
 import time
 import uuid
+import json
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
+
+from backend.core.database import AsyncSessionLocal
+from backend.core.models import CV
+from sqlalchemy.future import select
 
 logger = logging.getLogger("recruitai.worker")
 
@@ -167,6 +172,23 @@ class CVParseWorker:
                 job.status.value,
                 job.duration_ms,
             )
+
+            # Update DB record if exists
+            try:
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(select(CV).where(CV.id == job_id))
+                    cv_record = result.scalars().first()
+                    if cv_record:
+                        cv_record.status = job.status.value
+                        cv_record.overall_score = job.confidence_score
+                        if job.status == JobStatus.COMPLETED and parse_result:
+                            cv_record.parse_quality = json.dumps(parse_result.to_dict(), ensure_ascii=False)
+                            # Extract candidate name from parsed CV
+                            if parse_result.contact and parse_result.contact.name:
+                                cv_record.candidate_name = parse_result.contact.name
+                        await db.commit()
+            except Exception as db_exc:
+                logger.error("Failed to update CV database record for %s: %s", job_id, db_exc)
 
         return job
 

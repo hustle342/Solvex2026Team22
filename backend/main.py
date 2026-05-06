@@ -15,14 +15,19 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from backend.core.config import get_settings
+from backend.core.database import engine, Base
 from backend.api.upload import router as upload_router, init_upload_deps
 from backend.api.match import router as match_router
 from backend.api.chatbot import router as chatbot_router
+from backend.api.auth import router as auth_router
 
 # ── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -43,6 +48,10 @@ async def lifespan(app: FastAPI):
     # Initialise upload dependencies (storage, worker, job store)
     init_upload_deps()
     logger.info("Upload dependencies initialised")
+    # Create DB tables
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables initialized")
 
     yield  # ← app runs here
 
@@ -74,6 +83,7 @@ def create_app() -> FastAPI:
     )
 
     # ── Routers ────────────────────────────────────────────────────
+    app.include_router(auth_router, prefix=settings.API_PREFIX)
     app.include_router(upload_router, prefix=settings.API_PREFIX)
     app.include_router(match_router, prefix=settings.API_PREFIX)
     app.include_router(chatbot_router, prefix=f"{settings.API_PREFIX}/chatbot")
@@ -82,6 +92,14 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["system"])
     async def health():
         return {"status": "ok", "service": settings.APP_NAME, "version": settings.APP_VERSION}
+
+    # ── Frontend Static Files ──────────────────────────────────────
+    frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
+    if frontend_dir.exists():
+        # Serve static assets (CSS, JS)
+        app.mount("/static", StaticFiles(directory=str(frontend_dir / "static")), name="static")
+        # Serve index.html at root (html=True auto-serves index.html)
+        app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
 
     return app
 
