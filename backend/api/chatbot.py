@@ -5,7 +5,10 @@ import os
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
 
 router = APIRouter(tags=["chatbot"])
 
@@ -38,6 +41,9 @@ def generate_explanation_with_llm(candidate_name: str, score: float, factors: di
             f"Özellikle sistemimiz şu faktörleri göz önüne almıştır: {factors.get('summary_reasoning', 'Belirli yetenekler ve deneyim seviyesi')}. "
             f"Genel olarak bu aday, mevcut iş tanımı için orta-iyi düzeyde bir eşleşme profili sergilemektedir."
         )
+
+    if genai is None:
+        return "LLM SDK mevcut değil; mock açıklama modunda çalışılıyor."
 
     try:
         genai.configure(api_key=api_key)
