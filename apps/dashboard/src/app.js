@@ -310,7 +310,7 @@ async function defaultCandidateActionApi(candidateId, action) {
 }
 
 async function defaultAskAiApi(payload) {
-  const endpoint = "/api/v1/match/explain";
+  const endpoint = `${getApiBaseUrl()}/api/v1/match/explain`;
   const isStaticDemo =
     typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
 
