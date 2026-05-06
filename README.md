@@ -36,7 +36,3 @@ Projede yer alan frontend testlerini calistirmak icin:
 npm test
 ```
 
-## Dogrulama Notlari
-
-- [Sprint 2 Frontend Tests](docs/sprint2-frontend-tests.md)
-- [Recruiter Dashboard Validation](docs/recruiter-dashboard-validation.md)
