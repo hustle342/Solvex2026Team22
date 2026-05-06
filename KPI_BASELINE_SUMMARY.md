@@ -1,14 +1,16 @@
 ﻿# KPI Baseline Summary
 
-- Generated at: 2026-05-06 10:12
-- Valid samples: 0
-- Overall median manual screening time (minutes): NA
+- Generated at: 2026-05-06 10:14
+- Valid samples: 9
+- Overall median manual screening time (minutes): 11
 
 ## By Role Type
 
 | Role Type | Sample Count | Median Minutes | Average Minutes |
 |---|---:|---:|---:|
-| NA | 0 | NA | NA |
+| Backend Engineer | 3 | 12 | 12 |
+| Data Analyst | 3 | 10 | 10 |
+| Frontend Engineer | 3 | 11 | 11 |
 
 ## Next Action
 1. Copy this summary into KPI Governance issue comment.

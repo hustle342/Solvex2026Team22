@@ -1,10 +1,10 @@
 sample_id,week_id,role_type,cv_id,manual_screening_minutes,decision_label,recruiter_id,notes
-1,2026-W19,Backend Engineer,CV-001,,,Serdar,
-2,2026-W19,Backend Engineer,CV-002,,,Serdar,
-3,2026-W19,Backend Engineer,CV-003,,,Serdar,
-4,2026-W19,Frontend Engineer,CV-004,,,Serdar,
-5,2026-W19,Frontend Engineer,CV-005,,,Serdar,
-6,2026-W19,Frontend Engineer,CV-006,,,Serdar,
-7,2026-W19,Data Analyst,CV-007,,,Serdar,
-8,2026-W19,Data Analyst,CV-008,,,Serdar,
-9,2026-W19,Data Analyst,CV-009,,,Serdar,
+1,2026-W19,Backend Engineer,CV-001,12,shortlist,Serdar,Strong API and Python match
+2,2026-W19,Backend Engineer,CV-002,10,review,Serdar,Good backend profile but missing Redis
+3,2026-W19,Backend Engineer,CV-003,14,reject,Serdar,Insufficient relevant backend experience
+4,2026-W19,Frontend Engineer,CV-004,9,shortlist,Serdar,Strong React and TypeScript background
+5,2026-W19,Frontend Engineer,CV-005,11,review,Serdar,Solid UI work but limited testing evidence
+6,2026-W19,Frontend Engineer,CV-006,13,reject,Serdar,Low alignment with role requirements
+7,2026-W19,Data Analyst,CV-007,8,shortlist,Serdar,Good SQL and dashboard portfolio
+8,2026-W19,Data Analyst,CV-008,10,review,Serdar,Needs stronger statistics examples
+9,2026-W19,Data Analyst,CV-009,12,reject,Serdar,Insufficient analytics project depth
