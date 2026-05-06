@@ -1,38 +1,42 @@
 # RecruitAI
 
-RecruitAI is an AI-assisted recruiter workflow dashboard for CV intake, parsing quality monitoring, candidate ranking, and explainable shortlist decisions.
+RecruitAI, ise alim sureclerini daha hizli, daha gorunur ve daha aciklanabilir hale getirmek icin gelistirilmis yapay zeka destekli bir ise alim panelidir. Sistem; aday CV'lerinin yuklenmesi, ayristirilmasi, ayristirma kalitesinin izlenmesi, adaylarin puanlanarak siralanmasi ve ise alim uzmaninin bu puanlari yorumlayabilmesi icin aciklanabilir karar destegi sunar. Boylece kullanici yalnizca aday listesini gormekle kalmaz, ayni zamanda adayin neden one ciktigini veya neden daha dusuk degerlendirildigini de anlayabilir.
 
-## Dashboard
+## Panel
 
-Open the Sprint recruiter dashboard:
+Sprint kapsaminda hazirlanan ise alim panelini acmak icin:
 
 ```text
 apps/dashboard/index.html
 ```
 
-Open the candidate ranking demo:
+Aday siralama demosunu dogrudan acmak icin:
 
 ```text
 apps/dashboard/index.html?demo=ranking
 ```
 
-## Current Frontend Scope
+## Mevcut Arayuz Kapsami
 
-- Login and Recruiter role skeleton
-- PDF CV upload and processing status flow
-- Parse quality monitoring panel
-- AI score based candidate ranking table
-- Skill filtering and score / experience / applied date sorting
-- Explainability card for selected candidates
-- Shortlist and reject action API integration
+- Giris ekrani ve ise alim uzmani rolu icin temel kullanici akisı
+- PDF formatindaki CV'lerin yuklenmesi ve islenme durumunun adim adim izlenmesi
+- CV ayristirma kalitesini gosteren kalite paneli
+- Yapay zeka destekli aday puanlama ve siralama tablosu
+- Yetenek filtresi ile adaylari filtreleme
+- Puan, deneyim ve basvuru tarihine gore siralama
+- Secilen aday icin aciklanabilirlik karti
+- `Shortlist` ve `Reject` aksiyonlarinin API ile baglantili sekilde calismasi
+- Aday puanini aciklamak icin yapay zeka destekli yorumlama akisi
 
-## Tests
+## Testler
+
+Projede yer alan frontend testlerini calistirmak icin:
 
 ```bash
 npm test
 ```
 
-Validation notes:
+## Dogrulama Notlari
 
 - [Sprint 2 Frontend Tests](docs/sprint2-frontend-tests.md)
 - [Recruiter Dashboard Validation](docs/recruiter-dashboard-validation.md)
