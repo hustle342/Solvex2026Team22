@@ -1,1 +1,36 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Testing / Coverage
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Storage (runtime data)
+storage/
+
+# Environment
+.env
+.env.*
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files (frontend)
 .tmp/
