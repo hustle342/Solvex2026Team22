@@ -6,6 +6,7 @@ const DEFAULT_CREDENTIALS = {
   role: "recruiter",
 };
 
+const ENABLED_ROLES = new Set(["recruiter", "viewer"]);
 const PROCESSING_UPDATES = [
   ["Parsing", 32, { overall: 58, contact: 72, experience: 45, skills: 54, education: 51, confidence: "Low" }],
   ["Normalizing", 58, { overall: 76, contact: 86, experience: 69, skills: 78, education: 71, confidence: "Medium" }],
@@ -238,11 +239,11 @@ const defaultAuthService = {
     if (!email || !password) {
       return { ok: false, message: "Email and password are required." };
     }
-    if (role !== DEFAULT_CREDENTIALS.role) {
-      return { ok: false, message: "Only Recruiter role is enabled for Sprint 1." };
+    if (!ENABLED_ROLES.has(role)) {
+      return { ok: false, message: "Please choose Recruiter or Viewer role." };
     }
     if (email !== DEFAULT_CREDENTIALS.email || password !== DEFAULT_CREDENTIALS.password) {
-      return { ok: false, message: "Invalid recruiter credentials." };
+      return { ok: false, message: "Invalid credentials." };
     }
     return {
       ok: true,
@@ -272,7 +273,7 @@ function validatePdfFile(file, maxSizeBytes = 10 * 1024 * 1024) {
   return { valid: true, message: "" };
 }
 
-async function defaultCandidateActionApi(candidateId, action) {
+async function defaultCandidateActionApi(candidateId, action, candidate = null) {
   const endpoint = resolveApiUrl(`/api/v1/candidates/${encodeURIComponent(candidateId)}/${action}`);
   const isStaticDemo =
     typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
@@ -289,6 +290,7 @@ async function defaultCandidateActionApi(candidateId, action) {
     body: JSON.stringify({
       candidateId,
       action,
+      candidate,
       source: "recruiter-dashboard",
     }),
   });
@@ -336,6 +338,61 @@ async function defaultMentionApi(query, candidates = DEMO_CANDIDATES) {
     throw new Error(`Mention search failed with ${response.status}`);
   }
   return response.json();
+}
+
+async function defaultCandidateListApi() {
+  const endpoint = resolveApiUrl("/api/v1/candidates");
+  const isStaticDemo =
+    typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
+
+  if (isStaticDemo || typeof fetch === "undefined") {
+    return { candidates: [] };
+  }
+
+  const response = await fetch(endpoint);
+  if (!response.ok) {
+    throw new Error(`Candidate list failed with ${response.status}`);
+  }
+  return response.json();
+}
+
+async function defaultUploadApi(file) {
+  if (!shouldUseBackendUpload() || typeof fetch === "undefined" || typeof FormData === "undefined") {
+    return null;
+  }
+
+  const endpoint = resolveApiUrl("/api/v1/upload");
+  const formData = new FormData();
+  formData.append("file", file, file.name || "upload.pdf");
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`PDF upload failed with ${response.status}`);
+  }
+  return response.json();
+}
+
+async function defaultJobStatusApi(jobId) {
+  if (!shouldUseBackendUpload() || typeof fetch === "undefined") {
+    return null;
+  }
+
+  const response = await fetch(resolveApiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}`));
+  if (!response.ok) {
+    throw new Error(`Job status failed with ${response.status}`);
+  }
+  return response.json();
+}
+
+function shouldUseBackendUpload() {
+  if (typeof window === "undefined" || !window.location) return false;
+  if (getConfiguredApiBase()) return true;
+  const location = window.location;
+  return ["http:", "https:"].includes(location.protocol) && (location.port === "8000" || location.pathname.startsWith("/dashboard"));
 }
 
 function buildLocalScoreExplanation(candidate, question = "") {
@@ -447,6 +504,127 @@ function candidateToChatResult(candidate) {
   };
 }
 
+function normalizeCandidateListResponse(response) {
+  const candidates = Array.isArray(response) ? response : response && Array.isArray(response.candidates) ? response.candidates : [];
+  return candidates.map(normalizeCandidateRecord).filter(Boolean);
+}
+
+function normalizeCandidateRecord(candidate) {
+  if (!candidate || !candidate.id) return null;
+  return {
+    id: String(candidate.id),
+    name: String(candidate.name || candidate.label || candidate.id),
+    title: String(candidate.title || "Candidate"),
+    score: Number(candidate.score || candidate.candidateScore || 0),
+    experienceYears: Number(candidate.experienceYears || candidate.experience_years || 0),
+    appliedAt: candidate.appliedAt || new Date().toISOString().slice(0, 10),
+    skills: Array.isArray(candidate.skills) ? candidate.skills.map(String) : [],
+    recommendation: String(candidate.recommendation || "Review"),
+    status: candidate.status || "new",
+    factors: Array.isArray(candidate.factors) && candidate.factors.length ? candidate.factors : buildDefaultFactors(candidate),
+  };
+}
+
+function normalizeJobStatusResponse(response, fallback = {}) {
+  const parsed = (response && response.parsed_result) || {};
+  const quality = qualityFromJob(response || {});
+  return {
+    id: String((response && response.job_id) || fallback.id || `cv-${Date.now()}`),
+    fileName: String((response && response.filename) || fallback.fileName || "upload.pdf"),
+    status: jobStatusLabel((response && response.status) || fallback.status || "Queued"),
+    progress: jobProgress((response && response.status) || fallback.status),
+    uploadedAt: fallback.uploadedAt || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    parseQuality: quality,
+    parsedResult: parsed,
+  };
+}
+
+function normalizeCandidateFromJob(response) {
+  const parsed = response && response.parsed_result ? response.parsed_result : {};
+  const stored = normalizeCandidateRecord(parsed.candidate);
+  if (stored) return stored;
+
+  const contact = parsed.contact || {};
+  const skills = Array.isArray(parsed.skills) ? parsed.skills.map(String) : [];
+  const score = Math.round(Number(parsed.confidence_score || 0) * 100);
+  return normalizeCandidateRecord({
+    id: response && response.job_id,
+    name: contact.name || (response && response.filename ? String(response.filename).replace(/\.pdf$/i, "") : "Uploaded Candidate"),
+    title: "Uploaded CV",
+    score,
+    experienceYears: Array.isArray(parsed.experience) ? Math.min(parsed.experience.length * 1.5, 12) : 0,
+    skills,
+    recommendation: score >= 85 ? "Shortlist" : "Review",
+    status: "new",
+    fileName: response && response.filename,
+    summary: parsed.summary || "",
+  });
+}
+
+function qualityFromJob(response) {
+  const parsed = response.parsed_result || {};
+  const field = parsed.field_confidences || {};
+  const overall = Math.round(Number(response.confidence_score || parsed.confidence_score || 0) * 100);
+  return {
+    overall,
+    contact: averagePercent([field.name, field.email, field.phone]),
+    experience: percent(field.experience),
+    skills: percent(field.skills),
+    education: percent(field.education),
+    confidence: confidenceLabel(overall),
+  };
+}
+
+function averagePercent(values) {
+  const numeric = values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+  if (!numeric.length) return 0;
+  return Math.round((numeric.reduce((sum, value) => sum + value, 0) / numeric.length) * 100);
+}
+
+function percent(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric * 100) : 0;
+}
+
+function confidenceLabel(score) {
+  if (score >= 80) return "High";
+  if (score >= 55) return "Medium";
+  if (score > 0) return "Low";
+  return "Calculating";
+}
+
+function jobStatusLabel(status) {
+  const map = {
+    pending: "Queued",
+    processing: "Parsing",
+    completed: "Ready",
+    failed: "Failed",
+  };
+  return map[String(status || "").toLowerCase()] || status || "Queued";
+}
+
+function jobProgress(status) {
+  const map = {
+    pending: 12,
+    processing: 58,
+    completed: 100,
+    failed: 100,
+  };
+  return map[String(status || "").toLowerCase()] || 8;
+}
+
+function buildDefaultFactors(candidate) {
+  const skills = Array.isArray(candidate.skills) ? candidate.skills : [];
+  return [
+    {
+      label: "Stored candidate profile",
+      value: `${Number(candidate.score || candidate.candidateScore || 0)}/100`,
+      impact: "positive",
+      detail: candidate.summary || `${skills.length} skills are available from the saved analysis.`,
+    },
+  ];
+}
+
 function markdownPathForCandidate(candidate) {
   return `storage/markdown/candidates/${slugify(`${candidate.id}-${candidate.name}`)}.md`;
 }
@@ -505,6 +683,9 @@ function createRecruiterWorkflow(options = {}) {
   const candidateActionApi = options.candidateActionApi || defaultCandidateActionApi;
   const askAiApi = options.askAiApi || defaultAskAiApi;
   const mentionApi = options.mentionApi || ((query) => defaultMentionApi(query, state.candidates));
+  const candidateListApi = options.candidateListApi || defaultCandidateListApi;
+  const uploadApi = options.uploadApi || defaultUploadApi;
+  const jobStatusApi = options.jobStatusApi || defaultJobStatusApi;
   const timerApi = options.timerApi || (typeof window !== "undefined" ? window : globalThis);
   const clock = options.clock || (() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
   const state = options.state || createInitialState();
@@ -638,7 +819,11 @@ function createRecruiterWorkflow(options = {}) {
       state.session = result.session;
       state.error = null;
       state.activeView = "dashboard";
+      if (state.session.role === "viewer") {
+        state.selectedCandidateId = null;
+      }
       this.render();
+      this.refreshCandidates();
       return true;
     },
     logout() {
@@ -689,6 +874,15 @@ function createRecruiterWorkflow(options = {}) {
       state.error = null;
       this.render();
 
+      if (shouldUseBackendUpload()) {
+        this.uploadAndTrack(file, state.processing);
+        return true;
+      }
+
+      this.scheduleDemoProcessing();
+      return true;
+    },
+    scheduleDemoProcessing() {
       PROCESSING_UPDATES.forEach(([status, progress, quality], index) => {
         timerApi.setTimeout(() => {
           if (!state.processing) return;
@@ -699,6 +893,75 @@ function createRecruiterWorkflow(options = {}) {
         }, (index + 1) * 900);
       });
       return true;
+    },
+    async uploadAndTrack(file, localJob) {
+      try {
+        const upload = await uploadApi(file);
+        if (!upload || !upload.job_id) {
+          this.scheduleDemoProcessing();
+          return false;
+        }
+
+        state.processing = {
+          ...localJob,
+          id: upload.job_id,
+          fileName: upload.filename || localJob.fileName,
+          status: jobStatusLabel(upload.status),
+          progress: jobProgress(upload.status),
+        };
+        this.render();
+        await this.pollJob(upload.job_id, state.processing);
+        return true;
+      } catch (error) {
+        if (state.processing && state.processing.id === localJob.id) {
+          state.processing.status = "Failed";
+          state.processing.progress = 100;
+        }
+        state.error = error.message || "PDF upload failed.";
+        this.render();
+        return false;
+      }
+    },
+    async pollJob(jobId, localJob, attempt = 0) {
+      try {
+        const response = await jobStatusApi(jobId);
+        if (!response) return false;
+
+        state.processing = normalizeJobStatusResponse(response, localJob);
+        if (response.status === "completed") {
+          const candidate = normalizeCandidateFromJob(response);
+          if (candidate) {
+            const existingIndex = state.candidates.findIndex((item) => item.id === candidate.id);
+            if (existingIndex >= 0) {
+              state.candidates[existingIndex] = candidate;
+            } else {
+              state.candidates = [candidate, ...state.candidates];
+            }
+            state.selectedCandidateId = candidate.id;
+          }
+          state.history = [state.processing, ...state.history.filter((item) => item.id !== state.processing.id)].slice(0, 8);
+          state.dashboardSection = "quality";
+          state.error = null;
+          this.render();
+          this.refreshCandidates();
+          return true;
+        }
+        if (response.status === "failed") {
+          state.error = (response && response.error) || "PDF parsing failed.";
+          this.render();
+          return false;
+        }
+
+        this.render();
+        if (attempt < 30) {
+          timerApi.setTimeout(() => this.pollJob(jobId, state.processing, attempt + 1), 1200);
+        }
+        return true;
+      } catch (error) {
+        state.error = error.message || "Job status could not be loaded.";
+        this.render();
+        return false;
+      }
     },
     getVisibleCandidates() {
       return getVisibleCandidates(state);
@@ -730,6 +993,21 @@ function createRecruiterWorkflow(options = {}) {
       state.selectedCandidateId = candidateId;
       this.render();
       return true;
+    },
+    async refreshCandidates() {
+      try {
+        const response = await candidateListApi();
+        const candidates = normalizeCandidateListResponse(response);
+        if (!candidates.length) return false;
+        state.candidates = candidates;
+        if (!state.candidates.some((candidate) => candidate.id === state.selectedCandidateId)) {
+          state.selectedCandidateId = state.candidates[0].id;
+        }
+        this.render();
+        return true;
+      } catch (error) {
+        return false;
+      }
     },
     toggleChat() {
       state.chat.isOpen = !state.chat.isOpen;
@@ -829,7 +1107,7 @@ function createRecruiterWorkflow(options = {}) {
       this.render();
 
       try {
-        await candidateActionApi(candidateId, action);
+        await candidateActionApi(candidateId, action, buildCandidateExplainPayload(candidate));
         candidate.status = CANDIDATE_ACTIONS[action];
         state.actionStatus[candidateId] = `${action}:success`;
         this.render();
@@ -919,6 +1197,10 @@ function loginView(state) {
 }
 
 function dashboardView(state) {
+  if (state.session.role === "viewer") {
+    return viewerDashboardView(state);
+  }
+
   const active = state.processing || state.history[0];
   return `
     <section class="dashboard-layout">
@@ -964,6 +1246,55 @@ function dashboardView(state) {
 
         ${historyPanel(state)}
         ${chatPanel(state)}
+      </section>
+    </section>
+  `;
+}
+
+function viewerDashboardView(state) {
+  const active = state.processing || state.history[0];
+  return `
+    <section class="dashboard-layout viewer-layout">
+      <aside class="sidebar">
+        <div class="brand-row">
+          <div class="brand-mark compact">RA</div>
+          <div>
+            <strong>RecruitAI</strong>
+            <span>Viewer Console</span>
+          </div>
+        </div>
+        <nav class="nav-list" aria-label="Viewer sections">
+          ${dashboardNavItem("upload", "Upload PDF", uploadNavDetail(state), state)}
+          ${dashboardNavItem("processing", "Processing", processingNavDetail(active), state)}
+          ${dashboardNavItem("quality", "Score", qualityNavDetail(active), state)}
+        </nav>
+        <div class="user-card">
+          <span>${escapeHtml(state.session.email)}</span>
+          <strong>Viewer</strong>
+          <button id="logoutButton" type="button">Sign out</button>
+        </div>
+      </aside>
+
+      <section class="content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Candidate Viewer</p>
+            <h1>CV Score and Skills</h1>
+            <span class="topbar-note">Upload a PDF CV and review the saved parser result.</span>
+          </div>
+          <span class="role-pill">Viewer</span>
+        </header>
+
+        ${state.error ? `<p class="error-banner" role="alert">${escapeHtml(state.error)}</p>` : ""}
+
+        <section class="workflow-grid viewer-workflow">
+          ${uploadPanel(state)}
+          ${statusPanel(active, state)}
+          ${qualityPanel(active, state)}
+        </section>
+
+        ${viewerResultPanel(state)}
+        ${historyPanel(state)}
       </section>
     </section>
   `;
@@ -1054,6 +1385,69 @@ function candidateManagementView(state) {
       </article>
 
       ${explainabilityCard(selectedCandidate)}
+    </section>
+  `;
+}
+
+function viewerResultPanel(state) {
+  const candidate = state.candidates.find((item) => item.id === state.selectedCandidateId);
+  if (!candidate) {
+    return `
+      <section class="viewer-result">
+        <div class="section-heading">
+          <h2>CV Result</h2>
+          <span>Waiting for upload</span>
+        </div>
+        <p class="empty-state">Upload a PDF CV to see parser score, extracted skills, and database save status.</p>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="viewer-result">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Saved Candidate Record</p>
+          <h2>${escapeHtml(candidate.name)}</h2>
+        </div>
+        <span>${escapeHtml(candidate.fileName || "Database record")}</span>
+      </div>
+
+      <div class="viewer-result-grid">
+        <article class="score-summary">
+          <span class="score-ring">${candidate.score}</span>
+          <div>
+            <strong>${escapeHtml(candidate.recommendation)}</strong>
+            <small>${escapeHtml(candidate.title)}</small>
+          </div>
+        </article>
+        <article class="skill-summary">
+          <strong>Skills</strong>
+          <div>
+            ${
+              candidate.skills.length
+                ? candidate.skills.map((skill) => `<span class="skill-chip">${escapeHtml(skill)}</span>`).join("")
+                : `<span class="empty-state">No skills detected yet.</span>`
+            }
+          </div>
+        </article>
+      </div>
+
+      <div class="factor-list viewer-factors">
+        ${candidate.factors.map((factor) => factorItem(factor)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function factorItem(factor) {
+  return `
+    <section class="factor-item ${factor.impact}">
+      <div>
+        <strong>${escapeHtml(factor.label)}</strong>
+        <span>${escapeHtml(factor.value)}</span>
+      </div>
+      <p>${escapeHtml(factor.detail)}</p>
     </section>
   `;
 }
@@ -1503,12 +1897,15 @@ if (typeof module !== "undefined") {
     authenticate,
     buildLocalChatResponse,
     buildLocalCandidateSearchAnswer,
+    defaultCandidateListApi,
     defaultMentionApi,
     getConfiguredApiBase,
     createInitialState,
     createRecruiterWorkflow,
     defaultAskAiApi,
     defaultAuthService,
+    defaultJobStatusApi,
+    defaultUploadApi,
     defaultCandidateActionApi,
     escapeHtml,
     formatDate,
@@ -1519,9 +1916,13 @@ if (typeof module !== "undefined") {
     localCandidateSearch,
     localMentionSearch,
     normalizeAiAnswer,
+    normalizeCandidateListResponse,
+    normalizeCandidateFromJob,
+    normalizeJobStatusResponse,
     renderMarkdown,
     replaceActiveMention,
     resolveApiUrl,
+    shouldUseBackendUpload,
     statusClass,
     validatePdfFile,
   };

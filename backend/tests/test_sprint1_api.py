@@ -16,8 +16,10 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
+from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,17 +43,36 @@ _MINIMAL_PDF = (
 
 
 @pytest.fixture
-def temp_dirs(tmp_path):
-    """Create temporary upload and parsed directories."""
-    upload = tmp_path / "uploads"
-    parsed = tmp_path / "parsed"
-    upload.mkdir()
-    parsed.mkdir()
-    return str(upload), str(parsed)
+def isolated_candidate_db(monkeypatch):
+    """Route candidate persistence into a workspace-local test DB."""
+    from backend.core import database
+
+    db_dir = Path(".tmp") / f"sprint1-candidate-db-{uuid4().hex}"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    db_path = db_dir / "candidates.sqlite3"
+    monkeypatch.setattr(database, "database_path", lambda: db_path)
+    try:
+        yield db_path
+    finally:
+        shutil.rmtree(db_dir, ignore_errors=True)
 
 
 @pytest.fixture
-def storage_service(temp_dirs):
+def temp_dirs():
+    """Create temporary upload and parsed directories."""
+    root = Path(".tmp") / f"sprint1-api-tests-{uuid4().hex}"
+    upload = root / "uploads"
+    parsed = root / "parsed"
+    upload.mkdir(parents=True)
+    parsed.mkdir(parents=True)
+    try:
+        yield str(upload), str(parsed)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.fixture
+def storage_service(temp_dirs, isolated_candidate_db):
     """Create a StorageService with temp directories."""
     upload_dir, parsed_dir = temp_dirs
     # Patch settings so StorageService uses temp dirs
@@ -72,7 +93,7 @@ def job_store():
 
 
 @pytest.fixture
-def test_client(temp_dirs):
+def test_client(temp_dirs, isolated_candidate_db):
     """
     Create a FastAPI TestClient with directly-injected dependencies.
     We bypass lifespan init and inject singletons into the upload module
@@ -234,6 +255,10 @@ class TestCVParseWorker:
 
         assert result_job.status == JobStatus.COMPLETED
         assert result_job.confidence_score == 0.85
+        from backend.core.database import list_candidates
+        saved = list_candidates()
+        assert saved[0]["id"] == job_id
+        assert saved[0]["score"] == 85
 
     @pytest.mark.asyncio
     async def test_process_nonexistent_job_raises(self, storage_service, job_store):

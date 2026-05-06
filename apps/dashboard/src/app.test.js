@@ -6,7 +6,10 @@ const {
   defaultAskAiApi,
   defaultAuthService,
   defaultCandidateActionApi,
+  defaultCandidateListApi,
+  defaultJobStatusApi,
   defaultMentionApi,
+  defaultUploadApi,
   escapeHtml,
   getConfiguredApiBase,
   getActiveMentionQuery,
@@ -15,9 +18,13 @@ const {
   localCandidateSearch,
   localMentionSearch,
   normalizeAiAnswer,
+  normalizeCandidateFromJob,
+  normalizeCandidateListResponse,
+  normalizeJobStatusResponse,
   renderMarkdown,
   replaceActiveMention,
   resolveApiUrl,
+  shouldUseBackendUpload,
   statusClass,
   validatePdfFile,
 } = require("./app");
@@ -76,7 +83,7 @@ describe("RecruitAI login flow", () => {
     submitLogin(controller.root, { email: "wrong@recruitai.local" });
 
     expect(controller.state.session).toBeNull();
-    expect(controller.root.textContent).toContain("Invalid recruiter credentials.");
+    expect(controller.root.textContent).toContain("Invalid credentials.");
   });
 
   test("rejects wrong password", () => {
@@ -86,17 +93,31 @@ describe("RecruitAI login flow", () => {
     submitLogin(controller.root, { password: "bad-password" });
 
     expect(controller.state.session).toBeNull();
-    expect(controller.root.querySelector('[role="alert"]').textContent).toContain("Invalid recruiter credentials.");
+    expect(controller.root.querySelector('[role="alert"]').textContent).toContain("Invalid credentials.");
   });
 
-  test("rejects non-recruiter role", () => {
+  test("accepts viewer role and opens viewer dashboard", () => {
     const controller = makeController();
     controller.render();
 
     submitLogin(controller.root, { role: "viewer" });
 
-    expect(controller.state.session).toBeNull();
-    expect(controller.root.textContent).toContain("Only Recruiter role is enabled");
+    expect(controller.state.session).toEqual({
+      email: "recruiter@recruitai.local",
+      role: "viewer",
+    });
+    expect(controller.root.textContent).toContain("CV Score and Skills");
+    expect(controller.root.textContent).toContain("Viewer");
+  });
+
+  test("rejects unsupported roles", () => {
+    const result = authenticate(
+      { email: "recruiter@recruitai.local", password: "demo1234", role: "admin" },
+      defaultAuthService
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe("Please choose Recruiter or Viewer role.");
   });
 
   test("requires email", () => {
@@ -394,6 +415,62 @@ describe("RecruitAI PDF upload workflow", () => {
     expect(controller.root.textContent).toContain("High confidence");
   });
 
+  test("live upload stores completed job candidate in viewer state", async () => {
+    window.RECRUITAI_API_BASE = "http://127.0.0.1:8000";
+    const uploadApi = jest.fn(() => Promise.resolve({ job_id: "job-123", filename: "live.pdf", status: "pending" }));
+    const jobStatusApi = jest.fn(() =>
+      Promise.resolve({
+        job_id: "job-123",
+        filename: "live.pdf",
+        status: "completed",
+        confidence_score: 0.91,
+        parsed_result: {
+          candidate: {
+            id: "job-123",
+            name: "Live Candidate",
+            title: "Uploaded CV",
+            score: 91,
+            skills: ["Python", "FastAPI"],
+            recommendation: "Shortlist",
+            status: "new",
+            factors: [{ label: "CV parse quality", value: "91/100", impact: "positive", detail: "Good parse." }],
+          },
+          field_confidences: { name: 1, email: 1, phone: 0, skills: 1, experience: 0.8, education: 0.6 },
+        },
+      })
+    );
+    const controller = makeController({ uploadApi, jobStatusApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "viewer" };
+    controller.render();
+
+    controller.startProcessing(makeFile("live.pdf"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(uploadApi).toHaveBeenCalledWith(expect.objectContaining({ name: "live.pdf" }));
+    expect(jobStatusApi).toHaveBeenCalledWith("job-123");
+    expect(controller.state.selectedCandidateId).toBe("job-123");
+    expect(controller.root.textContent).toContain("Live Candidate");
+    expect(controller.root.textContent).toContain("Python");
+    delete window.RECRUITAI_API_BASE;
+  });
+
+  test("live upload failure shows an error", async () => {
+    window.RECRUITAI_API_BASE = "http://127.0.0.1:8000";
+    const controller = makeController({
+      uploadApi: jest.fn(() => Promise.reject(new Error("Backend offline"))),
+    });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "viewer" };
+    controller.render();
+
+    controller.startProcessing(makeFile("failed.pdf"));
+    await Promise.resolve();
+
+    expect(controller.state.processing.status).toBe("Failed");
+    expect(controller.root.textContent).toContain("Backend offline");
+    delete window.RECRUITAI_API_BASE;
+  });
+
   test("processing timer exits if job is cleared", () => {
     const controller = makeController();
     controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
@@ -444,6 +521,98 @@ describe("RecruitAI PDF upload workflow", () => {
   test("status class normalizes multi-word labels", () => {
     expect(statusClass("Quality Check")).toBe("quality-check");
     expect(statusClass("Needs Review")).toBe("needs-review");
+  });
+
+  test("normalizes completed job status and candidate fallback", () => {
+    const job = {
+      job_id: "job-fallback",
+      filename: "fallback.pdf",
+      status: "completed",
+      confidence_score: 0.73,
+      parsed_result: {
+        contact: { name: "Fallback Candidate" },
+        skills: ["SQL"],
+        experience: [{ title: "Analyst" }],
+        field_confidences: { name: 1, email: 0, phone: 0, skills: 0.5, experience: 1, education: 0 },
+      },
+    };
+
+    expect(normalizeJobStatusResponse(job).parseQuality).toEqual(
+      expect.objectContaining({ overall: 73, skills: 50, confidence: "Medium" })
+    );
+    expect(normalizeCandidateFromJob(job)).toEqual(
+      expect.objectContaining({ id: "job-fallback", name: "Fallback Candidate", skills: ["SQL"] })
+    );
+  });
+
+  test("normalizes low and empty job confidence labels", () => {
+    expect(normalizeJobStatusResponse({ status: "processing", confidence_score: 0.2 }).parseQuality.confidence).toBe("Low");
+    expect(normalizeJobStatusResponse({ status: "pending" }).parseQuality.confidence).toBe("Calculating");
+  });
+
+  test("live upload falls back to demo processing when API is unavailable", async () => {
+    window.RECRUITAI_API_BASE = "http://127.0.0.1:8000";
+    const controller = makeController({ uploadApi: jest.fn(() => Promise.resolve(null)) });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "viewer" };
+    controller.render();
+
+    controller.startProcessing(makeFile("fallback.pdf"));
+    await Promise.resolve();
+    jest.advanceTimersByTime(900);
+
+    expect(controller.state.processing.status).toBe("Parsing");
+    delete window.RECRUITAI_API_BASE;
+  });
+
+  test("polling handles failed and unavailable job status", async () => {
+    const failedController = makeController({
+      jobStatusApi: jest.fn(() => Promise.resolve({ job_id: "job-failed", status: "failed", error: "Parse failed" })),
+    });
+    failedController.state.session = { email: "recruiter@recruitai.local", role: "viewer" };
+    failedController.state.processing = { id: "job-failed", fileName: "failed.pdf", status: "Parsing", parseQuality: { overall: 0 } };
+    failedController.render();
+
+    await failedController.pollJob("job-failed", failedController.state.processing);
+
+    expect(failedController.root.textContent).toContain("Parse failed");
+
+    const missingController = makeController({ jobStatusApi: jest.fn(() => Promise.resolve(null)) });
+    await expect(missingController.pollJob("missing", { id: "missing" })).resolves.toBe(false);
+  });
+
+  test("polling updates existing candidates and schedules in-progress checks", async () => {
+    const controller = makeController({
+      jobStatusApi: jest.fn(() =>
+        Promise.resolve({
+          job_id: "cand-001",
+          filename: "existing.pdf",
+          status: "completed",
+          confidence_score: 0.86,
+          parsed_result: {
+            candidate: {
+              id: "cand-001",
+              name: "Updated Ayse",
+              score: 86,
+              skills: ["Python"],
+              recommendation: "Shortlist",
+              status: "new",
+            },
+          },
+        })
+      ),
+    });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "viewer" };
+    controller.render();
+
+    await controller.pollJob("cand-001", { id: "cand-001", fileName: "existing.pdf", status: "Parsing" });
+
+    expect(controller.state.candidates.find((candidate) => candidate.id === "cand-001").name).toBe("Updated Ayse");
+
+    const inProgress = makeController({
+      jobStatusApi: jest.fn(() => Promise.resolve({ job_id: "job-wait", filename: "wait.pdf", status: "processing" })),
+    });
+    await inProgress.pollJob("job-wait", { id: "job-wait", fileName: "wait.pdf", status: "Parsing" });
+    expect(inProgress.state.processing.status).toBe("Parsing");
   });
 
   test("escapes HTML before rendering dynamic text", () => {
@@ -565,7 +734,7 @@ describe("RecruitAI candidate ranking dashboard", () => {
 
     await controller.handleCandidateAction("cand-002", "shortlist");
 
-    expect(candidateActionApi).toHaveBeenCalledWith("cand-002", "shortlist");
+    expect(candidateActionApi).toHaveBeenCalledWith("cand-002", "shortlist", expect.objectContaining({ id: "cand-002" }));
     expect(controller.state.candidates.find((candidate) => candidate.id === "cand-002").status).toBe("shortlisted");
     expect(controller.root.textContent).toContain("Shortlisted");
   });
@@ -579,7 +748,7 @@ describe("RecruitAI candidate ranking dashboard", () => {
     controller.root.querySelector('[data-action="reject"][data-candidate-id="cand-004"]').click();
     await Promise.resolve();
 
-    expect(candidateActionApi).toHaveBeenCalledWith("cand-004", "reject");
+    expect(candidateActionApi).toHaveBeenCalledWith("cand-004", "reject", expect.objectContaining({ id: "cand-004" }));
     expect(controller.state.candidates.find((candidate) => candidate.id === "cand-004").status).toBe("rejected");
   });
 
@@ -617,6 +786,7 @@ describe("RecruitAI candidate ranking dashboard", () => {
         body: JSON.stringify({
           candidateId: "cand-001",
           action: "shortlist",
+          candidate: null,
           source: "recruiter-dashboard",
         }),
       })
@@ -639,6 +809,33 @@ describe("RecruitAI candidate ranking dashboard", () => {
     const candidates = getVisibleCandidates(controller.state);
 
     expect(candidates[0].name).toBe("Ayse Yilmaz");
+  });
+
+  test("refreshCandidates loads persisted candidates from API", async () => {
+    const candidateListApi = jest.fn(() =>
+      Promise.resolve({
+        candidates: [
+          {
+            id: "db-001",
+            name: "Database Candidate",
+            title: "Backend Engineer",
+            score: 82,
+            experienceYears: 4,
+            skills: ["Python", "SQLite"],
+            recommendation: "Review",
+            status: "shortlisted",
+          },
+        ],
+      })
+    );
+    const controller = makeController({ candidateListApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+
+    const loaded = await controller.refreshCandidates();
+
+    expect(loaded).toBe(true);
+    expect(controller.state.candidates[0].id).toBe("db-001");
+    expect(controller.state.selectedCandidateId).toBe("db-001");
   });
 
   test("sidebar section buttons show detail and activate workflow panels", () => {
@@ -882,6 +1079,104 @@ describe("RecruitAI Ask AI explainability chat", () => {
     expect(response[0].label).toBe("Cemocan Demir");
     expect(global.fetch).toHaveBeenCalledWith("/api/v1/knowledge/mentions?q=cem");
     global.fetch = originalFetch;
+  });
+
+  test("default candidate list API calls candidates endpoint", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ candidates: [] }),
+      })
+    );
+
+    const response = await defaultCandidateListApi();
+
+    expect(response.candidates).toEqual([]);
+    expect(global.fetch).toHaveBeenCalledWith("/api/v1/candidates");
+    global.fetch = originalFetch;
+  });
+
+  test("default upload API posts form data when backend upload is enabled", async () => {
+    window.RECRUITAI_API_BASE = "http://127.0.0.1:8000/";
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ job_id: "job-api", status: "pending" }),
+      })
+    );
+
+    expect(shouldUseBackendUpload()).toBe(true);
+    const response = await defaultUploadApi(makeFile("api.pdf"));
+
+    expect(response.job_id).toBe("job-api");
+    expect(global.fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/v1/upload",
+      expect.objectContaining({ method: "POST", body: expect.any(FormData) })
+    );
+    global.fetch = originalFetch;
+    delete window.RECRUITAI_API_BASE;
+  });
+
+  test("default upload API returns null without a backend target and throws on rejection", async () => {
+    expect(shouldUseBackendUpload()).toBe(false);
+    await expect(defaultUploadApi(makeFile("local.pdf"))).resolves.toBeNull();
+
+    window.RECRUITAI_API_BASE = "http://127.0.0.1:8000";
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 413 }));
+
+    await expect(defaultUploadApi(makeFile("too-large.pdf"))).rejects.toThrow("PDF upload failed with 413");
+    global.fetch = originalFetch;
+    delete window.RECRUITAI_API_BASE;
+  });
+
+  test("default job status API loads and rejects status responses", async () => {
+    window.RECRUITAI_API_BASE = "http://127.0.0.1:8000";
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ job_id: "job-api", status: "completed" }),
+      })
+    );
+
+    await expect(defaultJobStatusApi("job-api")).resolves.toEqual({ job_id: "job-api", status: "completed" });
+    expect(global.fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/api/v1/jobs/job-api");
+
+    global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 404 }));
+    await expect(defaultJobStatusApi("missing")).rejects.toThrow("Job status failed with 404");
+    global.fetch = originalFetch;
+    delete window.RECRUITAI_API_BASE;
+  });
+
+  test("default APIs use local/demo paths when fetch is unavailable", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = undefined;
+
+    await expect(defaultCandidateActionApi("cand-001", "shortlist")).resolves.toEqual(
+      expect.objectContaining({ ok: true, demo: true })
+    );
+    await expect(defaultAskAiApi({ message: "Explain", mentions: ["cand-001"] })).resolves.toEqual(
+      expect.objectContaining({ demo: true })
+    );
+    await expect(defaultMentionApi("cem")).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: "Cemocan Demir" })])
+    );
+    await expect(defaultCandidateListApi()).resolves.toEqual({ candidates: [] });
+    await expect(defaultJobStatusApi("job-1")).resolves.toBeNull();
+
+    global.fetch = originalFetch;
+  });
+
+  test("normalizes persisted candidate records for dashboard rendering", () => {
+    const candidates = normalizeCandidateListResponse({
+      candidates: [{ id: "db-001", name: "DB Candidate", score: 77, skills: ["SQL"] }],
+    });
+
+    expect(candidates[0]).toEqual(expect.objectContaining({ id: "db-001", status: "new" }));
+    expect(candidates[0].factors[0].label).toBe("Stored candidate profile");
   });
 
   test("local mention and search helpers rank demo candidates", () => {

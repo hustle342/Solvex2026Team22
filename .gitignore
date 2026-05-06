@@ -21,6 +21,7 @@ env/
 .coverage
 .pytest_cache/
 pytest-cache-files-*/
+pytest-work/
 htmlcov/
 
 # Node / Frontend

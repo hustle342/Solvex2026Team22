@@ -7,7 +7,6 @@ import io
 import json
 import logging
 import re
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +17,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from backend.core.config import get_settings
+from backend.core.database import save_candidate_record
 
 logger = logging.getLogger("recruitai.api.extension")
 router = APIRouter(prefix="/extension", tags=["chrome-extension"])
@@ -74,7 +74,7 @@ async def analyze_extension_pdf(payload: ExtensionAnalyzeRequest) -> ExtensionAn
         "metadata": payload.metadata,
         "saved_at": saved_at,
     }
-    await asyncio.to_thread(save_candidate_record, record, settings)
+    await asyncio.to_thread(save_candidate_record, record)
 
     logger.info(
         "extension_cv_analyzed candidate_id=%s filename=%s text_chars=%s analysis_source=%s",
@@ -253,60 +253,6 @@ def normalize_analysis(analysis: dict[str, Any], text: str, filename: str) -> di
     normalized["next_steps"] = as_string_list(normalized.get("next_steps")) or ["Recruiter incelemesi yap."]
     normalized["language"] = str(normalized.get("language") or "unknown")
     return normalized
-
-
-def save_candidate_record(record: dict[str, Any], settings: Any) -> None:
-    db_path = Path(getattr(settings, "EXTENSION_DB_PATH", "storage/candidates.sqlite3"))
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS candidates (
-                candidate_id TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
-                name TEXT NOT NULL,
-                email TEXT,
-                phone TEXT,
-                score INTEGER NOT NULL,
-                recommendation TEXT NOT NULL,
-                analysis_source TEXT NOT NULL,
-                source_url TEXT,
-                gmail_message_url TEXT,
-                metadata_json TEXT NOT NULL,
-                analysis_json TEXT NOT NULL,
-                extracted_text TEXT NOT NULL,
-                saved_at TEXT NOT NULL
-            )
-            """
-        )
-        analysis = record["analysis"]
-        connection.execute(
-            """
-            INSERT INTO candidates (
-                candidate_id, filename, name, email, phone, score, recommendation,
-                analysis_source, source_url, gmail_message_url, metadata_json,
-                analysis_json, extracted_text, saved_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                record["candidate_id"],
-                record["filename"],
-                analysis["name"],
-                analysis.get("email"),
-                analysis.get("phone"),
-                analysis["score"],
-                analysis["recommendation"],
-                record["analysis_source"],
-                record.get("source_url"),
-                record.get("gmail_message_url"),
-                json.dumps(record.get("metadata", {}), ensure_ascii=False),
-                json.dumps(analysis, ensure_ascii=False),
-                record["text"],
-                record["saved_at"],
-            ),
-        )
-        connection.commit()
 
 
 def extract_skills(text: str) -> list[str]:

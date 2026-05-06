@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     # Chrome extension CV analysis
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    CANDIDATE_DB_PATH: str = str(Path("storage/candidates.sqlite3").resolve())
     EXTENSION_DB_PATH: str = str(Path("storage/candidates.sqlite3").resolve())
 
     @property

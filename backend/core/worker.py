@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+from backend.core.database import save_candidate_from_parse
+
 logger = logging.getLogger("recruitai.worker")
 
 
@@ -143,6 +145,7 @@ class CVParseWorker:
             # ── Persist result ─────────────────────────────────────
             result_dict = parse_result.to_dict()
             result_dict["job_id"] = job_id
+            result_dict["candidate"] = save_candidate_from_parse(job_id, job.filename, result_dict)
             result_path = self.storage.save_parsed_result(job_id, result_dict)
 
             # ── Update job ─────────────────────────────────────────
