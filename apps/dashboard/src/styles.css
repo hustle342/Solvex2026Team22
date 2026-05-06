@@ -189,6 +189,17 @@ button:focus-visible {
   line-height: 1.5;
 }
 
+.error-banner {
+  margin: 0;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: var(--danger);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .dashboard-layout {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);

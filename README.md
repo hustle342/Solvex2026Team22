@@ -75,6 +75,16 @@ Recruiter workflow ekranlari eklendi:
 
 Detayli dogrulama notu: [docs/sprint1-frontend-validation.md](docs/sprint1-frontend-validation.md)
 
+## Sprint 2 Frontend Tests
+
+Frontend test altyapisi Jest + jsdom ile eklendi.
+
+```powershell
+npm test
+```
+
+Teknik not: [docs/sprint2-frontend-tests.md](docs/sprint2-frontend-tests.md)
+
 ## Takim
 
 - Serdar - Lead Developer
