@@ -1,14 +1,14 @@
-Stage 1 final update:
+1. Asama final guncellemesi:
 
-- Problem definition, theme alignment, real-life impact, and target user sections are completed.
-- Submission docs are finalized:
+- Problem tanimi, tema uyumu, gercek hayat etkisi ve hedef kullanici bolumleri tamamlandi.
+- Teslim dokumanlari tamamlandi:
   - STAGE1_PROBLEM_THEME.md
   - STAGE1_SCORING_CHECKLIST.md
-- KPI baseline evidence is attached from measured data:
+- KPI baseline kaniti olcum verilerinden eklendi:
   - Valid samples: 9
-  - Overall median manual screening time: 11 minutes
-  - Role medians: Backend 12, Frontend 11, Data Analyst 10
+  - Genel median manuel tarama suresi: 11 dakika
+  - Rol medianlari: Backend 12, Frontend 11, Data Analyst 10
 
-Readiness:
-- Stage 1 scoring checklist is completed.
-- Team is ready to proceed with Sprint 1 implementation under KPI and release gate governance.
+Hazirlik durumu:
+- 1. asama puanlama checklist'i tamamlandi.
+- Takim, KPI ve release gate yonetimi altinda Sprint 1 uygulamasina gecmeye hazir.

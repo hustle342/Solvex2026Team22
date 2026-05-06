@@ -1,23 +1,23 @@
-Sprint 1 kickoff message:
+Sprint 1 baslangic mesaji:
 
-Team,
-Sprint 1 starts now with implementation focus. Please work through issue -> branch -> PR flow and attach evidence in issue comments.
+Takim,
+Sprint 1 uygulama odakli olarak basladi. Lutfen issue -> branch -> PR akisinda ilerleyin ve kanitlari issue yorumlarina ekleyin.
 
 Samet (AI/Backend):
-1. Implement upload API + queue worker contract.
-2. Implement parser + OCR fallback.
-3. Persist parsed output with confidence score.
-Required evidence: PR link, sample input/output, test or smoke validation note.
+1. Upload API + queue worker sozlesmesini uygula.
+2. Parser + OCR fallback mekanizmasini uygula.
+3. Parse confidence ile ciktiyi kalici olarak kaydet.
+Gerekli kanit: PR linki, ornek input/output, test veya smoke dogrulama notu.
 
 Cemilcan (Platform/Frontend):
-1. Build upload + processing status screens.
-2. Add auth skeleton (login + recruiter role).
-3. Add parse quality monitoring panel (basic).
-Required evidence: PR link, screenshots, validation note.
+1. Upload ve isleme durum ekranlarini gelistir.
+2. Auth iskeleti ekle (login + recruiter role).
+3. Parse quality monitoring panelini (basic) ekle.
+Gerekli kanit: PR linki, ekran goruntuleri, dogrulama notu.
 
-Common rule:
-- Blockers must be reported in issue comments within 24 hours.
-- First technical PR will be evaluated with RELEASE_QUALITY_GATE.md PR Gate.
+Ortak kural:
+- Blocker durumlari 24 saat icinde issue yorumunda raporlanmali.
+- Ilk teknik PR, RELEASE_QUALITY_GATE.md icindeki PR Gate ile degerlendirilecek.
 
-Deadline:
-- First deliverable checkpoint: 2 business days
+Teslim:
+- Ilk teslim kontrol noktasi: 2 is gunu
