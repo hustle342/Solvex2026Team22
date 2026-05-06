@@ -173,6 +173,17 @@ function createInitialState() {
     },
     actionStatus: {},
     candidates: DEMO_CANDIDATES.map((candidate) => ({ ...candidate, factors: [...candidate.factors] })),
+    chat: {
+      isOpen: true,
+      isLoading: false,
+      input: "",
+      messages: [
+        {
+          role: "assistant",
+          content: "Select a candidate, then ask why the score looks high or low.",
+        },
+      ],
+    },
     history: [
       {
         id: "cv-1842",
@@ -282,6 +293,51 @@ async function defaultCandidateActionApi(candidateId, action) {
   return { ok: true, endpoint };
 }
 
+async function defaultAskAiApi(payload) {
+  const endpoint = "/api/v1/match/explain";
+  const isStaticDemo =
+    typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
+
+  if (isStaticDemo || typeof fetch === "undefined") {
+    return {
+      answer: buildLocalScoreExplanation(payload.candidate, payload.question),
+      endpoint,
+      demo: true,
+    };
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ask AI failed with ${response.status}`);
+  }
+  return response.json();
+}
+
+function buildLocalScoreExplanation(candidate, question = "") {
+  const topPositive = candidate.factors.find((factor) => factor.impact === "positive");
+  const topConcern = candidate.factors.find((factor) => factor.impact === "negative");
+  const concernLine = topConcern
+    ? `- Concern: ${topConcern.label} - ${topConcern.detail}`
+    : "- Concern: No major negative factor is currently flagged.";
+  return [
+    `### ${candidate.name} score explanation`,
+    `Score: ${candidate.score}/100. Recommendation: ${candidate.recommendation}.`,
+    "",
+    `- Strongest signal: ${topPositive ? `${topPositive.label} - ${topPositive.detail}` : "No positive factor found."}`,
+    concernLine,
+    `- Recruiter action: ${candidate.score >= 85 ? "Prioritize interview scheduling." : "Review the highlighted gaps before deciding."}`,
+    "",
+    question ? `Question interpreted: ${question}` : "Question interpreted: Explain this score.",
+  ].join("\n");
+}
+
 function getSkillOptions(candidates) {
   return Array.from(new Set(candidates.flatMap((candidate) => candidate.skills))).sort((a, b) => a.localeCompare(b));
 }
@@ -311,6 +367,7 @@ function createRecruiterWorkflow(options = {}) {
   const root = options.root || (typeof document !== "undefined" ? document.querySelector("#app") : null);
   const authService = options.authService || defaultAuthService;
   const candidateActionApi = options.candidateActionApi || defaultCandidateActionApi;
+  const askAiApi = options.askAiApi || defaultAskAiApi;
   const timerApi = options.timerApi || (typeof window !== "undefined" ? window : globalThis);
   const clock = options.clock || (() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
   const state = options.state || createInitialState();
@@ -396,6 +453,27 @@ function createRecruiterWorkflow(options = {}) {
           this.handleCandidateAction(button.dataset.candidateId, button.dataset.action);
         });
       });
+
+      root.querySelectorAll("[data-ask-ai]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.askAI(button.dataset.question || "Explain this score", button.dataset.candidateId);
+        });
+      });
+
+      const chatForm = root.querySelector("#aiChatForm");
+      if (chatForm) {
+        chatForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          const input = root.querySelector("#aiChatInput");
+          this.askAI(input.value);
+        });
+      }
+
+      const chatToggle = root.querySelector("#chatToggle");
+      if (chatToggle) {
+        chatToggle.addEventListener("click", () => this.toggleChat());
+      }
     },
     handleLogin(credentials) {
       const result = authenticate(credentials, authService);
@@ -500,6 +578,49 @@ function createRecruiterWorkflow(options = {}) {
       state.selectedCandidateId = candidateId;
       this.render();
       return true;
+    },
+    toggleChat() {
+      state.chat.isOpen = !state.chat.isOpen;
+      this.render();
+    },
+    async askAI(question, candidateId = state.selectedCandidateId) {
+      // Interactive Logic: Explainability Chat Engine
+      const candidate = state.candidates.find((item) => item.id === candidateId);
+      const prompt = String(question || "").trim() || "Explain this score";
+      if (!candidate || state.chat.isLoading) return false;
+
+      state.selectedCandidateId = candidate.id;
+      state.chat.isOpen = true;
+      state.chat.isLoading = true;
+      state.chat.input = "";
+      state.chat.messages.push({
+        role: "user",
+        content: prompt,
+      });
+      this.render();
+
+      try {
+        const response = await askAiApi({
+          question: prompt,
+          candidate: buildCandidateExplainPayload(candidate),
+          source: "recruiter-dashboard",
+        });
+        state.chat.messages.push({
+          role: "assistant",
+          content: normalizeAiAnswer(response),
+        });
+        state.chat.isLoading = false;
+        this.render();
+        return true;
+      } catch (error) {
+        state.chat.messages.push({
+          role: "assistant",
+          content: `### Unable to explain score\n${error.message || "The AI explanation service is unavailable."}`,
+        });
+        state.chat.isLoading = false;
+        this.render();
+        return false;
+      }
     },
     async handleCandidateAction(candidateId, action) {
       if (!CANDIDATE_ACTIONS[action]) return false;
@@ -645,6 +766,7 @@ function dashboardView(state) {
         </section>
 
         ${historyPanel(state)}
+        ${chatPanel(state)}
       </section>
     </section>
   `;
@@ -752,6 +874,9 @@ function candidateRow(candidate, state) {
           <button class="small-action reject" type="button" data-action="reject" data-candidate-id="${
             candidate.id
           }" ${actionBusy ? "disabled" : ""}>${status === "reject:loading" ? "Saving..." : "Reject"}</button>
+          <button class="small-action ask-ai" type="button" data-ask-ai data-question="Why this candidate score?" data-candidate-id="${
+            candidate.id
+          }">Ask AI</button>
         </div>
       </td>
     </tr>
@@ -782,6 +907,9 @@ function explainabilityCard(candidate) {
       <div class="recommendation-line">
         ${decisionBadge(candidate.status)}
         <strong>${escapeHtml(candidate.recommendation)}</strong>
+        <button class="small-action ask-ai" type="button" data-ask-ai data-question="Explain this score" data-candidate-id="${
+          candidate.id
+        }">Explain this score</button>
       </div>
 
       <div class="factor-list">
@@ -799,6 +927,53 @@ function explainabilityCard(candidate) {
           )
           .join("")}
       </div>
+    </article>
+  `;
+}
+
+function chatPanel(state) {
+  const candidate = state.candidates.find((item) => item.id === state.selectedCandidateId);
+  const candidateLabel = candidate ? `${candidate.name} - ${candidate.score}/100` : "No candidate";
+  const collapsed = !state.chat.isOpen;
+  return `
+    <aside class="ai-chat ${collapsed ? "collapsed" : ""}" aria-label="Ask AI score explanation panel">
+      <button id="chatToggle" class="chat-toggle" type="button" aria-expanded="${state.chat.isOpen}">
+        Ask AI
+      </button>
+      ${
+        collapsed
+          ? ""
+          : `
+            <div class="chat-surface">
+              <header class="chat-header">
+                <div>
+                  <p class="eyebrow">Ask AI</p>
+                  <strong>${escapeHtml(candidateLabel)}</strong>
+                </div>
+                <span class="chat-status">${state.chat.isLoading ? "Thinking" : "Ready"}</span>
+              </header>
+              <div class="chat-messages" role="log" aria-live="polite">
+                ${state.chat.messages.map((message) => chatMessage(message)).join("")}
+                ${state.chat.isLoading ? `<div class="chat-loading"><span></span>AI is thinking...</div>` : ""}
+              </div>
+              <form id="aiChatForm" class="chat-form">
+                <input id="aiChatInput" type="text" value="${escapeHtml(
+                  state.chat.input
+                )}" placeholder="Neden? Ask about this score" ${state.chat.isLoading ? "disabled" : ""}>
+                <button class="primary-action" type="submit" ${state.chat.isLoading ? "disabled" : ""}>Send</button>
+              </form>
+            </div>
+          `
+      }
+    </aside>
+  `;
+}
+
+function chatMessage(message) {
+  return `
+    <article class="chat-message ${message.role}">
+      <span>${message.role === "user" ? "You" : "AI"}</span>
+      <div>${renderMarkdown(message.content)}</div>
     </article>
   `;
 }
@@ -954,6 +1129,61 @@ function formatDate(value) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "2-digit" }).format(new Date(value));
 }
 
+function buildCandidateExplainPayload(candidate) {
+  return {
+    id: candidate.id,
+    name: candidate.name,
+    title: candidate.title,
+    score: candidate.score,
+    experienceYears: candidate.experienceYears,
+    skills: candidate.skills,
+    recommendation: candidate.recommendation,
+    factors: candidate.factors,
+  };
+}
+
+function normalizeAiAnswer(response) {
+  if (typeof response === "string") return response;
+  if (response && typeof response.answer === "string") return response.answer;
+  return "### Score explanation\nThe AI service returned an empty explanation.";
+}
+
+function renderMarkdown(value) {
+  const escaped = escapeHtml(value);
+  const lines = escaped.split("\n");
+  const output = [];
+  let listOpen = false;
+
+  lines.forEach((line) => {
+    if (line.startsWith("### ")) {
+      if (listOpen) {
+        output.push("</ul>");
+        listOpen = false;
+      }
+      output.push(`<h3>${line.slice(4)}</h3>`);
+      return;
+    }
+    if (line.startsWith("- ")) {
+      if (!listOpen) {
+        output.push("<ul>");
+        listOpen = true;
+      }
+      output.push(`<li>${line.slice(2)}</li>`);
+      return;
+    }
+    if (listOpen) {
+      output.push("</ul>");
+      listOpen = false;
+    }
+    if (line.trim()) {
+      output.push(`<p>${line}</p>`);
+    }
+  });
+
+  if (listOpen) output.push("</ul>");
+  return output.join("");
+}
+
 function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -974,12 +1204,16 @@ if (typeof module !== "undefined") {
     authenticate,
     createInitialState,
     createRecruiterWorkflow,
+    defaultAskAiApi,
     defaultAuthService,
     defaultCandidateActionApi,
     escapeHtml,
     formatDate,
+    buildCandidateExplainPayload,
     getSkillOptions,
     getVisibleCandidates,
+    normalizeAiAnswer,
+    renderMarkdown,
     statusClass,
     validatePdfFile,
   };
