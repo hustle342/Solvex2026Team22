@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.core.config import get_settings
 from backend.api.upload import router as upload_router, init_upload_deps
 from backend.api.match import router as match_router
+from backend.api.chatbot import router as chatbot_router
 
 # ── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     # ── Routers ────────────────────────────────────────────────────
     app.include_router(upload_router, prefix=settings.API_PREFIX)
     app.include_router(match_router, prefix=settings.API_PREFIX)
+    app.include_router(chatbot_router, prefix=f"{settings.API_PREFIX}/chatbot")
 
     # ── Health check ───────────────────────────────────────────────
     @app.get("/health", tags=["system"])
