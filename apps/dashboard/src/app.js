@@ -446,6 +446,134 @@ function validatePdfFile(file, maxSizeBytes = 10 * 1024 * 1024) {
   return { valid: true, message: "" };
 }
 
+async function defaultUploadApi(file) {
+  const endpoint = `${getApiBaseUrl()}/api/v1/upload`;
+  const isStaticDemo =
+    typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
+
+  if (isStaticDemo || typeof fetch === "undefined" || typeof FormData === "undefined") {
+    return {
+      job_id: `demo-${Date.now()}`,
+      filename: file?.name || "upload.pdf",
+      status: "pending",
+      message: "Demo upload accepted.",
+      demo: true,
+    };
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Upload failed with ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function defaultJobStatusApi(jobId) {
+  const endpoint = `${getApiBaseUrl()}/api/v1/jobs/${encodeURIComponent(jobId)}`;
+  const isStaticDemo =
+    typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
+
+  if (isStaticDemo || typeof fetch === "undefined") {
+    return {
+      job_id: jobId,
+      filename: "demo-upload.pdf",
+      status: "completed",
+      confidence_score: 89,
+      parsed_result: {
+        contact: { name: "Demo Candidate" },
+        summary: "Frontend, dashboard ve RecruitAI is akislari konusunda guclu deneyim.",
+        skills: ["JavaScript", "Dashboard UX", "API Integration"],
+        experience: [{ title: "Frontend Engineer" }, { title: "UI Developer" }],
+        confidence_score: 89,
+      },
+    };
+  }
+
+  const response = await fetch(endpoint);
+  if (!response.ok) {
+    throw new Error(`Job status failed with ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function normalizeJobStatus(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "pending") return "Queued";
+  if (normalized === "processing") return "Parsing";
+  if (normalized === "completed") return "Ready";
+  if (normalized === "failed") return "Needs Review";
+  return "Queued";
+}
+
+function normalizePercentageScore(value, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  const scaled = numeric <= 1 ? numeric * 100 : numeric;
+  return Math.max(0, Math.min(99, Math.round(scaled)));
+}
+
+function parseExperienceYears(experienceEntries = []) {
+  if (!Array.isArray(experienceEntries)) return 0;
+  const count = experienceEntries.filter(Boolean).length;
+  return Number((count * 1.5).toFixed(1));
+}
+
+function inferCandidateTitle(parsedResult = {}, fileName = "") {
+  const firstExperience = Array.isArray(parsedResult.experience) ? parsedResult.experience.find((item) => item?.title) : null;
+  if (firstExperience?.title) return firstExperience.title;
+  return String(fileName || "Candidate").replace(/\.pdf$/i, "").replace(/[-_]/g, " ");
+}
+
+function buildCandidateFromParsedResult(job) {
+  const parsed = job?.parsed_result || {};
+  const contact = parsed.contact || {};
+  const name = contact.name || String(job?.filename || "Candidate").replace(/\.pdf$/i, "").replace(/[-_]/g, " ");
+  const score = normalizePercentageScore(parsed.confidence_score ?? job?.confidence_score, 65);
+  const skills = Array.isArray(parsed.skills) ? parsed.skills.filter(Boolean).slice(0, 5) : [];
+  const summary = parsed.summary || "Ayrıştırılan CV sonucu temel alınarak aday profili oluşturuldu.";
+
+  return {
+    id: `cand-${job.job_id}`,
+    name,
+    title: inferCandidateTitle(parsed, job?.filename),
+    score,
+    experienceYears: parseExperienceYears(parsed.experience),
+    appliedAt: new Date().toISOString().slice(0, 10),
+    skills,
+    recommendation: score >= 85 ? "Shortlist" : "Review",
+    status: "new",
+    factors: [
+      {
+        label: "Parse confidence",
+        value: `${score}%`,
+        impact: score >= 75 ? "positive" : "negative",
+        detail: summary,
+      },
+      {
+        label: "Detected skills",
+        value: skills.length ? `${skills.length} skills` : "No skills",
+        impact: skills.length >= 3 ? "positive" : "negative",
+        detail: skills.length ? `CV icinden cikarilan beceriler: ${skills.join(", ")}.` : "CV icinde yeterli beceri sinyali bulunamadi.",
+      },
+    ],
+  };
+}
+
+function upsertCandidate(candidates, candidate) {
+  const next = candidates.filter((item) => item.id !== candidate.id);
+  next.unshift(candidate);
+  return next;
+}
+
 async function defaultCandidateActionApi(candidateId, action) {
   const endpoint = `${getApiBaseUrl()}/api/v1/candidates/${encodeURIComponent(candidateId)}/${action}`;
   const isStaticDemo =
@@ -548,6 +676,8 @@ function createRecruiterWorkflow(options = {}) {
   const authService = options.authService || defaultAuthService;
   const candidateActionApi = options.candidateActionApi || defaultCandidateActionApi;
   const askAiApi = options.askAiApi || defaultAskAiApi;
+  const uploadApi = options.uploadApi || defaultUploadApi;
+  const jobStatusApi = options.jobStatusApi || defaultJobStatusApi;
   const timerApi = options.timerApi || (typeof window !== "undefined" ? window : globalThis);
   const clock = options.clock || (() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
   const state = options.state || createInitialState();
@@ -715,6 +845,7 @@ function createRecruiterWorkflow(options = {}) {
 
       state.processing = {
         id: `cv-${Date.now()}`,
+        _token: `proc-${Date.now()}`,
         fileName: file.name,
         status: "Queued",
         progress: 8,
@@ -732,15 +863,76 @@ function createRecruiterWorkflow(options = {}) {
       state.error = null;
       this.render();
 
-      PROCESSING_UPDATES.forEach(([status, progress, quality], index) => {
-        timerApi.setTimeout(() => {
-          if (!state.processing) return;
-          state.processing.status = status;
-          state.processing.progress = progress;
-          state.processing.parseQuality = quality;
+      const processingToken = state.processing._token;
+
+      const pollJob = async (jobId) => {
+        try {
+          const job = await jobStatusApi(jobId);
+          if (!state.processing || state.processing._token !== processingToken) return;
+
+          const statusLabel = normalizeJobStatus(job.status);
+          const overallScore = normalizePercentageScore(job.confidence_score, 0);
+          const fallbackFieldScore = overallScore || 42;
+          state.processing.status = statusLabel;
+          state.processing.fileName = job.filename || state.processing.fileName;
+          state.processing.progress = statusLabel === "Ready" ? 100 : statusLabel === "Parsing" ? 58 : statusLabel === "Needs Review" ? 100 : 32;
+          state.processing.parseQuality = {
+            overall: overallScore,
+            contact: normalizePercentageScore(job.parsed_result?.field_confidences?.contact, fallbackFieldScore),
+            experience: normalizePercentageScore(job.parsed_result?.field_confidences?.experience, fallbackFieldScore),
+            skills: normalizePercentageScore(job.parsed_result?.field_confidences?.skills, fallbackFieldScore),
+            education: normalizePercentageScore(job.parsed_result?.field_confidences?.education, fallbackFieldScore),
+            confidence: overallScore >= 85 ? "High" : overallScore >= 65 ? "Medium" : "Low",
+          };
+
+          if (String(job.status).toLowerCase() === "completed" && job.parsed_result) {
+            const candidate = buildCandidateFromParsedResult(job);
+            state.candidates = upsertCandidate(state.candidates, candidate);
+            state.selectedCandidateId = candidate.id;
+            state.history = [state.processing, ...state.history].slice(0, 8);
+            state.processing = {
+              ...state.processing,
+              id: job.job_id,
+            };
+            this.render();
+            return;
+          }
+
+          if (String(job.status).toLowerCase() === "failed") {
+            state.error = job.error || "PDF parse failed.";
+            this.render();
+            return;
+          }
+
           this.render();
-        }, (index + 1) * 900);
-      });
+          timerApi.setTimeout(() => {
+            void pollJob(jobId);
+          }, 1200);
+        } catch (error) {
+          if (!state.processing || state.processing._token !== processingToken) return;
+          state.error = error.message || "Upload polling failed.";
+          this.render();
+        }
+      };
+
+      void uploadApi(file)
+        .then((upload) => {
+          if (!state.processing || state.processing._token !== processingToken) return;
+          state.processing.id = upload.job_id || state.processing.id;
+          state.processing.fileName = upload.filename || state.processing.fileName;
+          state.processing.status = normalizeJobStatus(upload.status);
+          state.processing.progress = 18;
+          this.render();
+          return pollJob(state.processing.id);
+        })
+        .catch((error) => {
+          if (!state.processing || state.processing._token !== processingToken) return;
+          state.error = error.message || "Upload failed.";
+          state.processing.status = "Needs Review";
+          state.processing.progress = 100;
+          this.render();
+        });
+
       return true;
     },
     getVisibleCandidates() {
@@ -1416,7 +1608,10 @@ if (typeof module !== "undefined") {
     defaultAskAiApi,
     defaultAuthService,
     defaultCandidateActionApi,
+    defaultJobStatusApi,
+    defaultUploadApi,
     escapeHtml,
+    buildCandidateFromParsedResult,
     formatDate,
     buildCandidateExplainPayload,
     getSkillOptions,

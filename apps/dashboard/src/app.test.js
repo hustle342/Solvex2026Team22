@@ -372,18 +372,90 @@ describe("RecruitAI PDF upload workflow", () => {
     expect(controller.state.processing.progress).toBe(8);
   });
 
-  test("processing timers advance status to ready and update quality", () => {
-    const controller = makeController();
+  test("processing timers advance status to ready and update quality", async () => {
+    const uploadApi = jest.fn(async (file) => ({
+      job_id: "job-demo-1",
+      filename: file.name,
+      status: "pending",
+    }));
+    const jobStatusApi = jest
+      .fn()
+      .mockResolvedValueOnce({
+        job_id: "job-demo-1",
+        filename: "candidate.pdf",
+        status: "processing",
+        confidence_score: 76,
+      })
+      .mockResolvedValueOnce({
+        job_id: "job-demo-1",
+        filename: "candidate.pdf",
+        status: "completed",
+        confidence_score: 89,
+        parsed_result: {
+          contact: { name: "Demo RecruitAI Candidate" },
+          summary: "Guclu teknik sinyaller tespit edildi.",
+          skills: ["Python", "FastAPI", "LLM"],
+          experience: [{ title: "AI Engineer" }, { title: "ML Engineer" }],
+          field_confidences: { contact: 95, experience: 84, skills: 91, education: 86 },
+        },
+      });
+    const controller = makeController({ uploadApi, jobStatusApi });
     controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
     controller.render();
 
     controller.startProcessing(makeFile("candidate.pdf"));
-    jest.advanceTimersByTime(3600);
+    await Promise.resolve();
+    jest.advanceTimersByTime(1200);
+    await Promise.resolve();
 
     expect(controller.state.processing.status).toBe("Ready");
     expect(controller.state.processing.progress).toBe(100);
     expect(controller.state.processing.parseQuality.overall).toBe(89);
     expect(controller.root.textContent).toContain("High confidence");
+  });
+
+  test("completed upload job adds parsed candidate into AI ranking", async () => {
+    const uploadApi = jest.fn(async (file) => ({
+      job_id: "job-123",
+      filename: file.name,
+      status: "pending",
+    }));
+    const jobStatusApi = jest
+      .fn()
+      .mockResolvedValueOnce({
+        job_id: "job-123",
+        filename: "new-ai-candidate.pdf",
+        status: "processing",
+        confidence_score: 77,
+      })
+      .mockResolvedValueOnce({
+        job_id: "job-123",
+        filename: "new-ai-candidate.pdf",
+        status: "completed",
+        confidence_score: 91,
+        parsed_result: {
+          contact: { name: "Zeynep Kaya" },
+          summary: "Python, FastAPI ve LLM projelerinde guclu sinyaller bulundu.",
+          skills: ["Python", "FastAPI", "LLM"],
+          experience: [{ title: "AI Engineer" }, { title: "Backend Engineer" }],
+          field_confidences: { contact: 92, experience: 88, skills: 95, education: 79 },
+        },
+      });
+    const controller = makeController({ uploadApi, jobStatusApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.startProcessing(makeFile("new-ai-candidate.pdf"));
+    await Promise.resolve();
+    jest.advanceTimersByTime(1200);
+    await Promise.resolve();
+
+    expect(uploadApi).toHaveBeenCalled();
+    expect(jobStatusApi).toHaveBeenCalledTimes(2);
+    expect(controller.state.processing.status).toBe("Ready");
+    expect(controller.state.selectedCandidateId).toBe("cand-job-123");
+    expect(controller.state.candidates[0].name).toBe("Zeynep Kaya");
+    expect(controller.root.textContent).toContain("Zeynep Kaya");
   });
 
   test("processing timer exits if job is cleared", () => {

@@ -22,9 +22,22 @@ class ExplainResponse(BaseModel):
     candidate_id: str
     explanation: str
 
+
+def build_fallback_explanation(candidate_name: str, score: float, factors: dict, include_service_note: bool = False) -> str:
+    summary_reasoning = factors.get("summary_reasoning", "Belirli yetenekler ve deneyim seviyesi")
+    service_note = " YZ servisi yogun oldugu icin bu ozet sistem verilerinden uretilmistir." if include_service_note else ""
+    return (
+        f"{candidate_name} isimli adayin {score} puan almasinin temel sebebi, "
+        f"gereksinimlerin onemli bir kismini karsiliyor olmasi ancak bazi alanlarda gelisim payi bulunmasidir. "
+        f"Degerlendirme ozellikle su noktalar uzerinden yapildi: {summary_reasoning}. "
+        f"Genel olarak aday, mevcut is tanimi icin orta-iyi duzeyde bir eslesme profili sergilemektedir."
+        f"{service_note}"
+    )
+
 def generate_explanation_with_llm(candidate_name: str, score: float, factors: dict) -> str:
     """Calls real LLM if API key is present, otherwise falls back to mock response."""
     api_key = os.environ.get("GEMINI_API_KEY")
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
     
     prompt = (
         f"Sen bir İK (İnsan Kaynakları) asistanısın. İK uzmanı sana soruyor: "
@@ -35,24 +48,18 @@ def generate_explanation_with_llm(candidate_name: str, score: float, factors: di
 
     if not api_key:
         # Fallback to mock response for CI/CD and local dev without keys
-        return (
-            f"{candidate_name} isimli adayın {score} puan almasının temel sebebi, "
-            f"gereksinimlerin bir kısmını karşılarken bazılarında eksik kalmasıdır. "
-            f"Özellikle sistemimiz şu faktörleri göz önüne almıştır: {factors.get('summary_reasoning', 'Belirli yetenekler ve deneyim seviyesi')}. "
-            f"Genel olarak bu aday, mevcut iş tanımı için orta-iyi düzeyde bir eşleşme profili sergilemektedir."
-        )
+        return build_fallback_explanation(candidate_name, score, factors)
 
     if genai is None:
-        return "LLM SDK mevcut değil; mock açıklama modunda çalışılıyor."
+        return build_fallback_explanation(candidate_name, score, factors, include_service_note=True)
 
     try:
         genai.configure(api_key=api_key)
-        # Using gemini-1.5-flash as it is very fast (2-5 seconds criteria)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name)
         response = model.generate_content(prompt)
         return response.text
-    except Exception as e:
-        return f"LLM yanıt oluştururken bir hata meydana geldi: {str(e)}"
+    except Exception:
+        return build_fallback_explanation(candidate_name, score, factors, include_service_note=True)
 
 
 @router.post(
