@@ -174,10 +174,20 @@ async def upload_batch(
     if not files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="En az bir dosya yüklemelisiniz.",
+            detail="En az bir dosya yüklemelisiniz. / At least one file is required.",
         )
 
     settings = get_settings()
+
+    # v2.0: enforce batch concurrent limit
+    from backend.cv_parser.config import ErrorMessages
+    batch_limit = getattr(settings, "BATCH_CONCURRENT_LIMIT", 10)
+    if len(files) > batch_limit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{ErrorMessages.BATCH_LIMIT_EXCEEDED['tr']} (max: {batch_limit}) / "
+                   f"{ErrorMessages.BATCH_LIMIT_EXCEEDED['en']} (max: {batch_limit})",
+        )
     jobs: List[UploadResponse] = []
 
     for file in files:

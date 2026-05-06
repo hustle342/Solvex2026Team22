@@ -1,5 +1,5 @@
 # Optimized by Skills Agent for RecruitAI
-# Core PDF CV Parser – Text extraction, section detection, structured JSON output
+# Core PDF CV Parser v2.0 – Text extraction, section detection, structured JSON output
 """
 PDFCVParser
 ===========
@@ -17,6 +17,7 @@ Design goals aligned with RecruitAI KPIs:
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import io
 import logging
@@ -39,6 +40,7 @@ from .config import (
     GITHUB_PATTERN,
     DATE_RANGE_PATTERN,
     ParserConfig,
+    ErrorMessages,
 )
 
 # ── Logging ────────────────────────────────────────────────────────────────
@@ -197,6 +199,10 @@ class PDFCVParser:
             logger.error("Validation failed: %s", exc)
             result.error = f"Validation error: {exc}"
             result.confidence_score = 0.0
+        except ParseTimeoutError as exc:
+            logger.error("Parse timeout: %s", exc)
+            result.error = ErrorMessages.PARSE_TIMEOUT["en"]
+            result.confidence_score = 0.0
         except TextExtractionError as exc:
             logger.error("Text extraction failed: %s", exc)
             result.error = f"Extraction error: {exc}"
@@ -323,8 +329,9 @@ class PDFCVParser:
         """
         Run OCR on a single page using pdf2image + pytesseract.
         Returns extracted text or None on failure.
+        Enforces per-page timeout (v2.0).
         """
-        try:
+        def _do_ocr() -> Optional[str]:
             from pdf2image import convert_from_bytes
             import pytesseract
 
@@ -341,6 +348,17 @@ class PDFCVParser:
             text = pytesseract.image_to_string(images[0], lang=lang_str)
             return text.strip() if text else None
 
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_do_ocr)
+                return future.result(timeout=self.config.ocr_timeout_seconds)
+
+        except concurrent.futures.TimeoutError:
+            logger.warning(
+                "OCR timeout on page %d (limit: %ds)",
+                page_number, self.config.ocr_timeout_seconds,
+            )
+            return None
         except ImportError:
             logger.warning(
                 "OCR dependencies (pdf2image / pytesseract) not installed. "
@@ -600,9 +618,10 @@ class PDFCVParser:
 
     def _compute_field_confidences(self, result: ParseResult) -> Dict[str, float]:
         """
-        Compute per-field confidence as a simple heuristic:
-        1.0 = field found and non-empty, 0.0 = missing.
-        For list-fields, partial credit based on count.
+        v2.0 confidence scoring – goes beyond binary presence to evaluate:
+        - Field presence (binary)
+        - List-field richness (count-based partial credit)
+        - Text quality heuristics
         """
         conf: Dict[str, float] = {}
 
@@ -615,7 +634,7 @@ class PDFCVParser:
         # Section fields
         conf["summary"] = min(len(result.summary) / 50, 1.0) if result.summary else 0.0
 
-        # List fields – partial credit
+        # List fields – partial credit with higher thresholds
         conf["education"] = min(len(result.education) / 1.0, 1.0) if result.education else 0.0
         conf["experience"] = min(len(result.experience) / 1.0, 1.0) if result.experience else 0.0
         conf["skills"] = min(len(result.skills) / 3.0, 1.0) if result.skills else 0.0
@@ -623,21 +642,42 @@ class PDFCVParser:
         conf["certifications"] = 1.0 if result.certifications else 0.0
         conf["projects"] = 1.0 if result.projects else 0.0
 
+        # v2.0: text quality score (chars per page, penalize very short text)
+        if result.total_pages > 0:
+            avg_chars = len(result.raw_text) / result.total_pages
+            conf["text_quality"] = min(avg_chars / 500.0, 1.0)
+        else:
+            conf["text_quality"] = 0.0
+
+        # v2.0: OCR penalty – pages needing OCR are lower confidence
+        if result.total_pages > 0:
+            ocr_ratio = result.ocr_pages / result.total_pages
+            conf["ocr_penalty"] = 1.0 - (ocr_ratio * 0.3)  # max 30% penalty
+        else:
+            conf["ocr_penalty"] = 1.0
+
+        # v2.0: section detection richness
+        detected = len([s for s in result.sections_detected if s != "_full"])
+        conf["section_richness"] = min(detected / 4.0, 1.0)
+
         return conf
 
     def _compute_overall_confidence(self, result: ParseResult) -> float:
         """
-        Weighted overall confidence score (0.0 – 1.0).
-        Critical fields carry heavier weight.
+        v2.0 weighted overall confidence score (0.0 – 1.0).
+        Includes text quality, OCR penalty, and section richness factors.
         """
         weights = {
-            "name": 0.15,
-            "email": 0.15,
-            "phone": 0.05,
-            "education": 0.20,
-            "experience": 0.25,
-            "skills": 0.15,
-            "summary": 0.05,
+            "name": 0.12,
+            "email": 0.12,
+            "phone": 0.03,
+            "education": 0.15,
+            "experience": 0.20,
+            "skills": 0.12,
+            "summary": 0.03,
+            "text_quality": 0.08,
+            "ocr_penalty": 0.08,
+            "section_richness": 0.07,
         }
         total_weight = sum(weights.values())
         score = sum(
@@ -654,3 +694,7 @@ class FileValidationError(Exception):
 
 class TextExtractionError(Exception):
     """Raised when text extraction from PDF fails entirely."""
+
+
+class ParseTimeoutError(Exception):
+    """Raised when the parse operation exceeds the configured timeout."""

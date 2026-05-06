@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # ── Parser ─────────────────────────────────────────────────────────
     PARSER_OCR_ENABLED: bool = True
     PARSER_MAX_PAGES: int = 30
+    PARSER_OCR_TIMEOUT: int = 30           # v2.0: per-page OCR timeout (seconds)
+    PARSER_PARSE_TIMEOUT: int = 120        # v2.0: overall parse timeout (seconds)
+    BATCH_CONCURRENT_LIMIT: int = 10       # v2.0: max files in a batch upload
 
     @property
     def max_upload_bytes(self) -> int:
