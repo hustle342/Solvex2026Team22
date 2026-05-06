@@ -1,18 +1,18 @@
-Release Quality Gate completion update:
+Release Quality Gate tamamlama guncellemesi:
 
-Completed deliverables:
-- Release quality gate policy is documented.
-- PR Gate pilot report is executed and recorded.
+Tamamlanan teslimler:
+- Release quality gate politikasi dokumante edildi.
+- PR Gate pilot raporu calistirildi ve kaydedildi.
 
-Evidence:
+Kanitlar:
 - RELEASE_QUALITY_GATE.md
 - PR_GATE_PILOT_REPORT.md
 
-Pilot outcome:
-- Decision: Conditional Pass
-- Main gap: CI/test evidence enforcement was missing on the pilot PR.
-- Action owner and target date are documented in the pilot report.
+Pilot sonucu:
+- Karar: Conditional Pass
+- Ana eksik: Pilot PR'da CI/test kaniti zorunlulugu uygulanmadi.
+- Aksiyon sahibi ve hedef tarih pilot raporunda yazildi.
 
-Closure reason:
-Issue scope for defining gate policy and running initial pilot is completed.
-Next technical PRs will continue under Sprint 1 lead tracking with the same gate checklist.
+Kapanis nedeni:
+Bu issue kapsamindaki gate politikasinin tanimlanmasi ve ilk pilotun calistirilmasi tamamlandi.
+Sonraki teknik PR'lar Sprint 1 lead takibi altinda ayni gate checklist ile devam edecek.

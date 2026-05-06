@@ -1,10 +1,10 @@
-ADR completion update:
+ADR tamamlama guncellemesi:
 
-Completed deliverables:
-- ADR index and template are in place.
-- Five accepted ADR decisions are documented.
+Tamamlanan teslimler:
+- ADR indeks ve sablonu hazir.
+- Kabul edilmis 5 ADR karari dokumante edildi.
 
-Evidence:
+Kanitlar:
 - docs/adr/README.md
 - docs/adr/000-template.md
 - docs/adr/001-backend-framework-fastapi.md
@@ -13,6 +13,6 @@ Evidence:
 - docs/adr/004-authn-authz-rbac.md
 - docs/adr/005-model-prompt-versioning.md
 
-Closure reason:
-Issue scope for ADR foundation and critical decision documentation is completed.
-Future architecture changes will continue through new ADR updates under sprint execution issues.
+Kapanis nedeni:
+Bu issue kapsamindaki ADR temeli ve kritik karar dokumantasyonu tamamlandi.
+Yeni mimari degisiklikler sprint uygulama issue'lari altinda yeni ADR guncellemeleriyle devam edecek.
