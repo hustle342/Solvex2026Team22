@@ -13,6 +13,12 @@ const PROCESSING_UPDATES = [
   ["Ready", 100, { overall: 89, contact: 95, experience: 84, skills: 91, education: 86, confidence: "High" }],
 ];
 
+const DEFAULT_PERFORMANCE_THRESHOLDS_MS = {
+  upload: 250,
+  parse: 4000,
+  render: 120,
+};
+
 function createInitialState() {
   return {
     session: null,
@@ -52,6 +58,10 @@ function createInitialState() {
         },
       },
     ],
+    performance: {
+      metrics: {},
+      alerts: [],
+    },
   };
 }
 
@@ -102,26 +112,160 @@ function validatePdfFile(file, maxSizeBytes = 10 * 1024 * 1024) {
   return { valid: true, message: "" };
 }
 
+function percentile(values, percentileRank) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.ceil((percentileRank / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
+}
+
+function defaultNow() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function createPerformanceMonitor(options = {}) {
+  const thresholds = {
+    ...DEFAULT_PERFORMANCE_THRESHOLDS_MS,
+    ...(options.thresholds || {}),
+  };
+  const now = options.now || defaultNow;
+  const maxSamples = options.maxSamples || 100;
+  const alertHandler =
+    options.alertHandler ||
+    ((alert) => {
+      if (typeof console !== "undefined" && typeof console.warn === "function") {
+        console.warn("[RecruitAI performance alert]", alert);
+      }
+    });
+  const samples = {};
+  const alerts = [];
+
+  function isPromiseLike(value) {
+    return value && typeof value.then === "function";
+  }
+
+  function record(metric, durationMs, context = {}) {
+    const rounded = Math.max(0, Math.round(Number(durationMs || 0) * 100) / 100);
+    samples[metric] = [...(samples[metric] || []), rounded].slice(-maxSamples);
+    const p95 = percentile(samples[metric], 95);
+    const thresholdMs = thresholds[metric];
+
+    if (typeof thresholdMs === "number" && p95 > thresholdMs) {
+      const alert = {
+        metric,
+        p95,
+        thresholdMs,
+        sampleCount: samples[metric].length,
+        context,
+        triggeredAt: new Date().toISOString(),
+      };
+      alerts.push(alert);
+      alertHandler(alert);
+    }
+
+    return { metric, durationMs: rounded, p95, thresholdMs };
+  }
+
+  function measure(metric, callback, context = {}) {
+    const startedAt = now();
+    try {
+      const result = callback();
+      if (isPromiseLike(result)) {
+        return Promise.resolve(result).finally(() => {
+          record(metric, now() - startedAt, context);
+        });
+      }
+      record(metric, now() - startedAt, context);
+      return result;
+    } catch (error) {
+      record(metric, now() - startedAt, { ...context, outcome: "error" });
+      throw error;
+    }
+  }
+
+  function start(metric, context = {}) {
+    const startedAt = now();
+    let ended = false;
+    let lastResult = null;
+    return {
+      end(extraContext = {}) {
+        if (ended) return lastResult;
+        ended = true;
+        lastResult = record(metric, now() - startedAt, { ...context, ...extraContext });
+        return lastResult;
+      },
+    };
+  }
+
+  function getSummary() {
+    const metrics = {};
+    Object.keys(samples).forEach((metric) => {
+      const values = samples[metric];
+      metrics[metric] = {
+        count: values.length,
+        latestMs: values[values.length - 1] || 0,
+        p95Ms: percentile(values, 95),
+        thresholdMs: thresholds[metric],
+      };
+    });
+
+    return {
+      metrics,
+      alerts: [...alerts],
+    };
+  }
+
+  return {
+    getSummary,
+    measure,
+    record,
+    start,
+    thresholds,
+  };
+}
+
 function createRecruiterWorkflow(options = {}) {
   const root = options.root || (typeof document !== "undefined" ? document.querySelector("#app") : null);
   const authService = options.authService || defaultAuthService;
   const timerApi = options.timerApi || (typeof window !== "undefined" ? window : globalThis);
   const clock = options.clock || (() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  const idFactory = options.idFactory || (() => `cv-${Date.now()}`);
+  const processingDelayMs = options.processingDelayMs || 900;
+  const performanceMonitor = options.performanceMonitor || createPerformanceMonitor(options.performanceOptions);
   const state = options.state || createInitialState();
 
+  function syncPerformanceState() {
+    state.performance = performanceMonitor.getSummary();
+  }
+
   const controller = {
+    performanceMonitor,
     state,
     root,
+    refreshPerformancePanel() {
+      if (!root) return;
+      const panel = root.querySelector("[data-performance-panel]");
+      if (panel) {
+        panel.outerHTML = performancePanel(state.performance);
+      }
+    },
     render() {
       if (!root) return;
-      if (!state.session) {
-        root.innerHTML = loginView(state);
-        this.bindLogin();
-        return;
-      }
+      performanceMonitor.measure("render", () => {
+        if (!state.session) {
+          root.innerHTML = loginView(state);
+          this.bindLogin();
+          return;
+        }
 
-      root.innerHTML = dashboardView(state);
-      this.bindDashboard();
+        root.innerHTML = dashboardView(state);
+        this.bindDashboard();
+      }, { view: state.session ? "dashboard" : "login" });
+      syncPerformanceState();
+      this.refreshPerformancePanel();
     },
     bindLogin() {
       const form = root.querySelector("#loginForm");
@@ -193,18 +337,25 @@ function createRecruiterWorkflow(options = {}) {
       this.render();
     },
     selectFile(file) {
-      const result = validatePdfFile(file);
-      if (!result.valid) {
-        state.error = result.message;
-        state.selectedFile = null;
-        this.render();
-        return false;
-      }
+      const selected = performanceMonitor.measure("upload", () => {
+        const result = validatePdfFile(file);
+        if (!result.valid) {
+          state.error = result.message;
+          state.selectedFile = null;
+          this.render();
+          syncPerformanceState();
+          return false;
+        }
 
-      state.selectedFile = file;
-      state.error = null;
-      this.render();
-      return true;
+        state.selectedFile = file;
+        state.error = null;
+        this.render();
+        syncPerformanceState();
+        return true;
+      }, { fileName: file && file.name ? file.name : "unknown" });
+      syncPerformanceState();
+      this.refreshPerformancePanel();
+      return selected;
     },
     startProcessing(file) {
       const result = validatePdfFile(file);
@@ -215,7 +366,7 @@ function createRecruiterWorkflow(options = {}) {
       }
 
       state.processing = {
-        id: `cv-${Date.now()}`,
+        id: idFactory(file),
         fileName: file.name,
         status: "Queued",
         progress: 8,
@@ -233,6 +384,7 @@ function createRecruiterWorkflow(options = {}) {
       state.error = null;
       this.render();
 
+      const parseMetric = performanceMonitor.start("parse", { fileName: file.name, jobId: state.processing.id });
       PROCESSING_UPDATES.forEach(([status, progress, quality], index) => {
         timerApi.setTimeout(() => {
           if (!state.processing) return;
@@ -240,7 +392,12 @@ function createRecruiterWorkflow(options = {}) {
           state.processing.progress = progress;
           state.processing.parseQuality = quality;
           this.render();
-        }, (index + 1) * 900);
+          if (status === "Ready") {
+            parseMetric.end({ status });
+            syncPerformanceState();
+            this.refreshPerformancePanel();
+          }
+        }, (index + 1) * processingDelayMs);
       });
       return true;
     },
@@ -361,6 +518,7 @@ function dashboardView(state) {
           ${qualityPanel(active)}
         </section>
 
+        ${performancePanel(state.performance)}
         ${historyPanel(state)}
       </section>
     </section>
@@ -450,6 +608,40 @@ function qualityPanel(item) {
   `;
 }
 
+function performancePanel(performanceState) {
+  const metrics = (performanceState && performanceState.metrics) || {};
+  const alerts = (performanceState && performanceState.alerts) || [];
+  const rows = ["upload", "parse", "render"];
+
+  return `
+    <section class="performance-section" data-performance-panel>
+      <div class="section-heading">
+        <h2>Performance p95</h2>
+        <span>${alerts.length} alerts</span>
+      </div>
+      <div class="performance-grid">
+        ${rows
+          .map((metricName) => {
+            const metric = metrics[metricName] || {};
+            const p95Ms = Number(metric.p95Ms || 0);
+            const thresholdMs = Number(metric.thresholdMs || DEFAULT_PERFORMANCE_THRESHOLDS_MS[metricName]);
+            const isOverLimit = p95Ms > thresholdMs;
+            return `
+              <div class="performance-metric">
+                <span>${capitalize(metricName)}</span>
+                <strong>${formatMs(p95Ms)}</strong>
+                <small class="${isOverLimit ? "over-limit" : "within-limit"}">
+                  p95 limit ${formatMs(thresholdMs)}
+                </small>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
 function historyPanel(state) {
   const rows = [state.processing, ...state.history].filter(Boolean);
   return `
@@ -508,6 +700,10 @@ function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function formatMs(value) {
+  return `${Math.round(Number(value || 0))}ms`;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -520,12 +716,15 @@ function escapeHtml(value) {
 /* istanbul ignore next */
 if (typeof module !== "undefined") {
   module.exports = {
+    DEFAULT_PERFORMANCE_THRESHOLDS_MS,
     PROCESSING_UPDATES,
     authenticate,
     createInitialState,
+    createPerformanceMonitor,
     createRecruiterWorkflow,
     defaultAuthService,
     escapeHtml,
+    percentile,
     statusClass,
     validatePdfFile,
   };

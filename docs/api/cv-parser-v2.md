@@ -1,101 +1,256 @@
-# RecruitAI CV Parser v2.0
-**API and Technical Documentation**
+# RecruitAI CV Parser v2.0 API
 
-## 1. Overview
-The CV Parser v2.0 is the core of the RecruitAI data ingestion pipeline. It asynchronously processes uploaded PDF resumes, extracts structured data (contact, education, experience, skills, etc.) using NLP heuristics and OCR, and provides a multi-factor confidence score for automated HR screening.
+## Overview
 
-## 2. Key Features (v2.0 Updates)
-- **Advanced OCR Fallback**: Integrated `pytesseract` with a strict per-page timeout (default 30s) to prevent frozen threads.
-- **Robust Error Handling**: Standardized bilingual (TR/EN) error messages for UI display. Graceful handling of corrupted PDFs, empty files, and excessively large documents.
-- **Enhanced Confidence Scoring**: Added Text Quality and OCR Penalty parameters to the scoring algorithm.
-- **Batch Processing Limits**: API rejects batch uploads that exceed the `BATCH_CONCURRENT_LIMIT` (default: 10 files) to prevent server overload.
+CV Parser v2.0 is the RecruitAI ingestion API for asynchronous PDF resume parsing. Clients upload one or more PDF files, receive a `job_id`, poll the job until it reaches `completed`, and then read the structured parsing result from the same job endpoint.
 
----
+Base URL for local development:
 
-## 3. Upload API Endpoints
+```text
+http://localhost:8000/api/v1
+```
 
-### 3.1. Single Upload
-`POST /api/v1/upload`
-Uploads a single PDF file and enqueues it for background parsing.
+Authentication is expected to be sent as a bearer token when enabled by the target environment:
 
-**Request:**
-- `Content-Type: multipart/form-data`
-- `file`: (Binary PDF file)
+```http
+Authorization: Bearer <RECRUITAI_API_TOKEN>
+```
 
-**Response (202 Accepted):**
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/upload` | Upload one PDF and enqueue a parse job. |
+| `POST` | `/upload/batch` | Upload up to `BATCH_CONCURRENT_LIMIT` PDFs. |
+| `GET` | `/jobs` | List parse jobs and their current state. |
+| `GET` | `/jobs/{job_id}` | Get job status; includes `parsed_result` when complete. |
+
+## curl Examples
+
+### 1. Upload a PDF file
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/upload" \
+  -H "Authorization: Bearer $RECRUITAI_API_TOKEN" \
+  -F "file=@./samples/candidate_cv.pdf;type=application/pdf"
+```
+
+Successful response:
+
 ```json
 {
-  "job_id": "uuid-string",
+  "job_id": "9d8b0f88-9c9f-4b31-83f5-14d13f82d5e6",
   "filename": "candidate_cv.pdf",
   "status": "pending",
-  "message": "CV yüklendi. Ayrıştırma işlemi arka planda başlatıldı."
-}
-```
-**Errors (400/413/415/500):** Bilingual error detail matching the `ErrorMessages` catalog.
-
-### 3.2. Batch Upload
-`POST /api/v1/upload/batch`
-Uploads up to `BATCH_CONCURRENT_LIMIT` PDF files at once.
-
-**Request:**
-- `Content-Type: multipart/form-data`
-- `files`: (Multiple binary PDF files)
-
-**Response (202 Accepted):**
-```json
-{
-  "total": 2,
-  "jobs": [
-    {
-      "job_id": "uuid-1",
-      "filename": "cv1.pdf",
-      "status": "pending",
-      "message": "Kuyruğa eklendi."
-    },
-    ...
-  ]
+  "message": "CV uploaded. Parsing started in the background."
 }
 ```
 
-### 3.3. Job Status & Results
-`GET /api/v1/jobs/{job_id}`
-Retrieves the status and the resulting JSON data of a specific parse job.
+### 2. Query job status
 
-**Response (200 OK):**
+```bash
+curl -X GET "http://localhost:8000/api/v1/jobs/9d8b0f88-9c9f-4b31-83f5-14d13f82d5e6" \
+  -H "Authorization: Bearer $RECRUITAI_API_TOKEN"
+```
+
+Typical in-progress response:
+
 ```json
 {
-  "job_id": "uuid",
+  "job_id": "9d8b0f88-9c9f-4b31-83f5-14d13f82d5e6",
+  "filename": "candidate_cv.pdf",
+  "status": "processing",
+  "created_at": "2026-05-06T10:15:22Z",
+  "started_at": "2026-05-06T10:15:23Z",
+  "completed_at": null,
+  "duration_ms": 0,
+  "confidence_score": 0,
+  "error": null,
+  "parsed_result": null
+}
+```
+
+### 3. Retrieve completed parse result
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/jobs/9d8b0f88-9c9f-4b31-83f5-14d13f82d5e6" \
+  -H "Authorization: Bearer $RECRUITAI_API_TOKEN" \
+  -H "Accept: application/json"
+```
+
+Completed response:
+
+```json
+{
+  "job_id": "9d8b0f88-9c9f-4b31-83f5-14d13f82d5e6",
+  "filename": "candidate_cv.pdf",
   "status": "completed",
-  "confidence_score": 0.89,
   "duration_ms": 1450.5,
+  "confidence_score": 0.89,
+  "error": null,
   "parsed_result": {
-    "contact": { "name": "Ahmet Yılmaz", "email": "..." },
-    "education": [...],
-    "experience": [...],
+    "contact": {
+      "name": "Ahmet Yilmaz",
+      "email": "ahmet@example.com"
+    },
+    "education": [],
+    "experience": [],
     "skills": ["Python", "FastAPI"]
   }
 }
 ```
 
----
+## Python Integration
 
-## 4. Confidence Scoring Algorithm
-The parser evaluates the reliability of its output on a `0.0` to `1.0` scale.
+The example below uploads a file, polls with a bounded timeout, and returns the parsed result once the job completes.
 
-**Weights:**
-- Experience: 20%
-- Education: 15%
-- Name & Email: 12% each
-- Skills: 12%
-- **Text Quality**: 8% (Evaluates character count per page)
-- **OCR Penalty**: 8% (Deducts score if OCR fallback was required)
-- **Section Richness**: 7% (Evaluates how many distinct sections were found)
-- Phone & Summary: 3% each
+```python
+import os
+import time
+import requests
 
----
+BASE_URL = os.getenv("RECRUITAI_API_URL", "http://localhost:8000/api/v1")
+TOKEN = os.getenv("RECRUITAI_API_TOKEN", "")
 
-## 5. Technical Validation Note
-**Coverage:** 91% (60+ unit tests passing)
-**Resilience:** Timeouts applied globally to `_extract_text` and per-page for `_ocr_page`.
-**Performance:** Average clean-PDF parse time < 0.5s.
-**Compliance:** Python strictly uses duck typing for streams and ensures all file payloads are aggressively garbage-collected post-processing.
+headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
+
+
+def upload_cv(path: str) -> str:
+    with open(path, "rb") as pdf:
+        response = requests.post(
+            f"{BASE_URL}/upload",
+            headers=headers,
+            files={"file": (path, pdf, "application/pdf")},
+            timeout=30,
+        )
+    response.raise_for_status()
+    return response.json()["job_id"]
+
+
+def wait_for_result(job_id: str, timeout_seconds: int = 120) -> dict:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        response = requests.get(f"{BASE_URL}/jobs/{job_id}", headers=headers, timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+
+        if payload["status"] == "completed":
+            return payload["parsed_result"]
+        if payload["status"] == "failed":
+            raise RuntimeError(payload.get("error") or "CV parse failed")
+
+        time.sleep(2)
+
+    raise TimeoutError(f"Parse job did not complete in {timeout_seconds}s: {job_id}")
+
+
+job_id = upload_cv("./samples/candidate_cv.pdf")
+parsed_cv = wait_for_result(job_id)
+print(parsed_cv["contact"])
+```
+
+## JavaScript Integration
+
+### Browser or Node 18+ with fetch
+
+```javascript
+const baseUrl = process.env.RECRUITAI_API_URL || "http://localhost:8000/api/v1";
+const token = process.env.RECRUITAI_API_TOKEN;
+
+async function uploadCv(file) {
+  const body = new FormData();
+  body.append("file", file, file.name || "candidate_cv.pdf");
+
+  const response = await fetch(`${baseUrl}/upload`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Upload failed: ${response.status} ${await response.text()}`);
+  }
+
+  return response.json();
+}
+
+async function getJob(jobId) {
+  const response = await fetch(`${baseUrl}/jobs/${jobId}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    throw new Error(`Status request failed: ${response.status} ${await response.text()}`);
+  }
+
+  return response.json();
+}
+```
+
+### Node.js with axios
+
+```javascript
+const fs = require("fs");
+const axios = require("axios");
+const FormData = require("form-data");
+
+const baseUrl = process.env.RECRUITAI_API_URL || "http://localhost:8000/api/v1";
+const token = process.env.RECRUITAI_API_TOKEN;
+
+async function parseCv(path) {
+  const form = new FormData();
+  form.append("file", fs.createReadStream(path), {
+    filename: "candidate_cv.pdf",
+    contentType: "application/pdf",
+  });
+
+  const upload = await axios.post(`${baseUrl}/upload`, form, {
+    headers: {
+      ...form.getHeaders(),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    timeout: 30000,
+  });
+
+  const jobId = upload.data.job_id;
+
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const status = await axios.get(`${baseUrl}/jobs/${jobId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      timeout: 10000,
+    });
+
+    if (status.data.status === "completed") return status.data.parsed_result;
+    if (status.data.status === "failed") throw new Error(status.data.error || "CV parse failed");
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  throw new Error(`Timed out waiting for parse job: ${jobId}`);
+}
+```
+
+## Troubleshooting
+
+| HTTP code | Common cause | Recommended fix |
+| --- | --- | --- |
+| `400 Bad Request` | Empty upload, missing `file` field, or batch size above `BATCH_CONCURRENT_LIMIT`. | Confirm the multipart field is named `file` for single upload or `files` for batch upload. Check file size and batch count before sending. |
+| `401 Unauthorized` | Missing, expired, or environment-specific bearer token. | Send `Authorization: Bearer <token>`, rotate expired tokens, and verify that the token belongs to the same staging/production environment. |
+| `500 Internal Server Error` | Storage write failure, parser runtime error, or worker dependency not initialized. | Retry once with the same file, then inspect backend logs for the `job_id`. Confirm upload and parsed-output directories are writable. |
+
+Additional operational notes:
+
+- `413 Request Entity Too Large` means the file exceeds `MAX_UPLOAD_SIZE_MB`.
+- `415 Unsupported Media Type` means the request is not a PDF or the MIME type/extension is not accepted.
+- Poll every 2 seconds in normal clients; avoid sub-second polling because parsing is asynchronous and can create unnecessary load.
+- Treat `confidence_score < 0.70` as a review-needed parse result, not as a transport failure.
+
+## Confidence Scoring
+
+The parser returns `confidence_score` on a `0.0` to `1.0` scale. The current v2.0 scoring model weights extracted profile sections, text quality, OCR fallback penalty, and section richness. A high score indicates that the extracted fields are likely usable without manual correction.
+
+## Validation Notes
+
+- OCR fallback uses a per-page timeout to prevent stalled parses.
+- Batch uploads are bounded by `BATCH_CONCURRENT_LIMIT`, defaulting to 10 files.
+- Clean digital PDFs are expected to parse well under the global parser timeout; scanned or OCR-heavy PDFs may take longer.

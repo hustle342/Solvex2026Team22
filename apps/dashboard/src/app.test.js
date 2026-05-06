@@ -1,11 +1,18 @@
 const {
+  DEFAULT_PERFORMANCE_THRESHOLDS_MS,
+  PROCESSING_UPDATES,
   authenticate,
+  createPerformanceMonitor,
   createRecruiterWorkflow,
   defaultAuthService,
   escapeHtml,
+  percentile,
   statusClass,
   validatePdfFile,
 } = require("./app");
+
+let generatedId = 0;
+const TEST_PROCESSING_DELAY_MS = 25;
 
 function makeRoot() {
   document.body.innerHTML = '<main id="app"></main>';
@@ -16,6 +23,8 @@ function makeController(options = {}) {
   return createRecruiterWorkflow({
     root: makeRoot(),
     clock: () => "10:00",
+    idFactory: () => `cv-test-${++generatedId}`,
+    processingDelayMs: TEST_PROCESSING_DELAY_MS,
     ...options,
   });
 }
@@ -205,11 +214,12 @@ describe("RecruitAI login flow", () => {
 
 describe("RecruitAI PDF upload workflow", () => {
   beforeEach(() => {
+    generatedId = 0;
     jest.useFakeTimers();
   });
 
   afterEach(() => {
-    jest.runOnlyPendingTimers();
+    jest.clearAllTimers();
     jest.useRealTimers();
   });
 
@@ -338,6 +348,7 @@ describe("RecruitAI PDF upload workflow", () => {
     controller.root.querySelector("#startProcessing").click();
 
     expect(controller.state.processing.fileName).toBe("button-start.pdf");
+    expect(controller.state.processing.id).toBe("cv-test-1");
     expect(controller.state.processing.status).toBe("Queued");
   });
 
@@ -369,26 +380,49 @@ describe("RecruitAI PDF upload workflow", () => {
     const controller = makeController();
     controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
     controller.render();
+    const totalProcessingMs = PROCESSING_UPDATES.length * TEST_PROCESSING_DELAY_MS;
 
     controller.startProcessing(makeFile("candidate.pdf"));
-    jest.advanceTimersByTime(3600);
+    jest.advanceTimersByTime(totalProcessingMs);
 
     expect(controller.state.processing.status).toBe("Ready");
     expect(controller.state.processing.progress).toBe(100);
     expect(controller.state.processing.parseQuality.overall).toBe(89);
     expect(controller.root.textContent).toContain("High confidence");
+    expect(controller.root.textContent).toContain("Performance p95");
+    expect(controller.state.performance.metrics.parse.p95Ms).toBe(totalProcessingMs);
   });
 
-  test("processing timer exits if job is cleared", () => {
+  test("cleared processing job ignores pending async timer updates", () => {
     const controller = makeController();
     controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
     controller.render();
 
     controller.startProcessing(makeFile("candidate.pdf"));
     controller.state.processing = null;
-    jest.advanceTimersByTime(900);
+    jest.advanceTimersByTime(PROCESSING_UPDATES.length * TEST_PROCESSING_DELAY_MS);
 
     expect(controller.state.processing).toBeNull();
+  });
+
+  test("processing schedule can be driven by an injected timer API", () => {
+    const scheduled = [];
+    const timerApi = {
+      setTimeout: jest.fn((callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      }),
+    };
+    const controller = makeController({ processingDelayMs: 25, timerApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.startProcessing(makeFile("manual-timer.pdf"));
+    scheduled.slice().forEach((job) => job.callback());
+
+    expect(timerApi.setTimeout).toHaveBeenCalledTimes(4);
+    expect(scheduled.map((job) => job.delay)).toEqual([25, 50, 75, 100]);
+    expect(controller.state.processing.status).toBe("Ready");
   });
 
   test("start processing blocks invalid files", () => {
@@ -433,5 +467,72 @@ describe("RecruitAI PDF upload workflow", () => {
 
   test("escapes HTML before rendering dynamic text", () => {
     expect(escapeHtml('<img src=x onerror="alert(1)">')).toBe("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+  });
+});
+
+describe("RecruitAI performance instrumentation", () => {
+  test("computes p95 using deterministic sample ordering", () => {
+    expect(percentile([100, 5, 50, 25], 95)).toBe(100);
+  });
+
+  test("records upload, parse, and render metrics without relying on wall clock time", () => {
+    let now = 0;
+    const alerts = [];
+    const performanceMonitor = createPerformanceMonitor({
+      now: () => {
+        now += 5;
+        return now;
+      },
+      thresholds: { upload: 10, parse: 100, render: 10 },
+      alertHandler: (alert) => alerts.push(alert),
+    });
+    const controller = makeController({
+      performanceMonitor,
+      timerApi: {
+        setTimeout: (callback) => {
+          now += 40;
+          callback();
+        },
+      },
+    });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+
+    controller.render();
+    controller.selectFile(makeFile("instrumented.pdf"));
+    controller.startProcessing(makeFile("instrumented.pdf"));
+
+    expect(controller.state.performance.metrics.render.count).toBeGreaterThan(0);
+    expect(controller.state.performance.metrics.upload.p95Ms).toBeGreaterThan(10);
+    expect(controller.state.performance.metrics.parse.p95Ms).toBeGreaterThan(100);
+    expect(alerts.some((alert) => alert.metric === "upload")).toBe(true);
+    expect(alerts.some((alert) => alert.metric === "parse")).toBe(true);
+  });
+
+  test("waits for async hotspot work before recording duration", async () => {
+    let now = 0;
+    const alerts = [];
+    const performanceMonitor = createPerformanceMonitor({
+      now: () => now,
+      thresholds: { parse: 50 },
+      alertHandler: (alert) => alerts.push(alert),
+    });
+
+    const result = performanceMonitor.measure("parse", async () => {
+      now = 75;
+      return "completed";
+    }, { jobId: "async-parse" });
+
+    expect(performanceMonitor.getSummary().metrics.parse).toBeUndefined();
+    await expect(result).resolves.toBe("completed");
+    expect(performanceMonitor.getSummary().metrics.parse.p95Ms).toBe(75);
+    expect(alerts).toHaveLength(1);
+  });
+
+  test("uses documented default p95 thresholds for critical frontend hotspots", () => {
+    expect(DEFAULT_PERFORMANCE_THRESHOLDS_MS).toEqual({
+      upload: 250,
+      parse: 4000,
+      render: 120,
+    });
   });
 });

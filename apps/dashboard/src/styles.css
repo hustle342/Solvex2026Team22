@@ -104,7 +104,8 @@ button {
 
 .login-card,
 .panel,
-.history-section {
+.history-section,
+.performance-section {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -310,7 +311,8 @@ button:focus-visible {
 }
 
 .panel,
-.history-section {
+.history-section,
+.performance-section {
   padding: 20px;
 }
 
@@ -491,6 +493,46 @@ button:focus-visible {
   gap: 14px;
 }
 
+.performance-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.performance-metric {
+  display: grid;
+  gap: 7px;
+  min-height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #f8fafc;
+}
+
+.performance-metric span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.performance-metric strong {
+  font-size: 24px;
+}
+
+.performance-metric small {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.within-limit {
+  color: var(--success);
+}
+
+.over-limit {
+  color: var(--danger);
+}
+
 .quality-row {
   display: grid;
   gap: 7px;
@@ -587,6 +629,10 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .performance-grid {
+    grid-template-columns: 1fr;
+  }
+
   .quality-panel {
     grid-column: auto;
   }
@@ -599,7 +645,8 @@ th {
 
   .login-card,
   .panel,
-  .history-section {
+  .history-section,
+  .performance-section {
     padding: 16px;
   }
 
