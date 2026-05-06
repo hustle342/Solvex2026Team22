@@ -18,6 +18,169 @@ const CANDIDATE_ACTIONS = {
   reject: "rejected",
 };
 
+const TR_TRANSLATIONS = {
+  "CV upload, parsing status, and quality monitoring for recruiter review.": "CV yukleme, ayrıştırma durumu ve kalite takibi ile işe alım incelemesini hızlandırır.",
+  "workload target": "iş yükü hedefi",
+  "parse quality goal": "ayrıştırma kalite hedefi",
+  "Recruiter Access": "İşe Alım Girişi",
+  "Sign in": "Giriş Yap",
+  "Email": "E-posta",
+  "Password": "Şifre",
+  "Role": "Rol",
+  "Continue": "Devam Et",
+  "Viewer": "Görüntüleyici",
+  "Role-based routing is mocked for Sprint 1 and ready for API integration.": "Rol bazlı yönlendirme Sprint 1 için mock durumdadır ve API entegrasyonuna hazırdır.",
+  "Recruiter Console": "İşe Alım Konsolu",
+  "Upload Flow": "Yükleme Akışı",
+  "Processing": "İşlem",
+  "Quality": "Kalite",
+  "Sign out": "Çıkış Yap",
+  "Recruiter Efficiency Engine": "İşe Alım Verimlilik Motoru",
+  "Recruiter Dashboard": "İşe Alım Paneli",
+  "CV Intake and Parsing Monitor": "CV Alımı ve Ayrıştırma İzleme",
+  "Recruiter": "İşe Alım Uzmanı",
+  "AI Candidate Ranking": "YZ Aday Sıralaması",
+  "Candidate Pipeline": "Aday Hattı",
+  "shown": "gösterilen",
+  "Skill filter": "Yetenek filtresi",
+  "All skills": "Tüm yetenekler",
+  "Score": "Puan",
+  "Experience": "Deneyim",
+  "Applied": "Başvuru",
+  "Candidate": "Aday",
+  "Skills": "Yetenekler",
+  "Decision": "Karar",
+  "Shortlist": "Listeye Al",
+  "Reject": "Reddet",
+  "Review": "İncele",
+  "New": "Yeni",
+  "Shortlisted": "Listeye Alındı",
+  "Rejected": "Reddedildi",
+  "Saving...": "Kaydediliyor...",
+  "yrs": "yıl",
+  "Explainability": "Açıklanabilirlik",
+  "Explainability Card": "Açıklanabilirlik Kartı",
+  "No candidate selected": "Aday seçilmedi",
+  "Ask AI": "YZ'ye Sor",
+  "Explain this score": "Bu puanı açıkla",
+  "Upload CV": "CV Yükle",
+  "Step 1": "Adım 1",
+  "Step 2": "Adım 2",
+  "Step 3": "Adım 3",
+  "No PDF selected": "PDF seçilmedi",
+  "Drop a PDF here or browse from your device.": "PDF dosyasını buraya bırakın veya cihazınızdan seçin.",
+  "Start parsing": "Ayrıştırmayı başlat",
+  "Processing Status": "İşlem Durumu",
+  "Uploaded": "Yüklendi",
+  "Processing progress": "İşlem ilerlemesi",
+  "Queued": "Kuyrukta",
+  "Parsing": "Ayrıştırılıyor",
+  "Normalizing": "Normalize ediliyor",
+  "Quality Check": "Kalite Kontrol",
+  "Parse Quality": "Ayrıştırma Kalitesi",
+  "Weighted extraction quality": "Ağırlıklı çıkarım kalitesi",
+  "Contact": "İletişim",
+  "Education": "Eğitim",
+  "Recent CV Jobs": "Son CV İşleri",
+  "records": "kayıt",
+  "File": "Dosya",
+  "Status": "Durum",
+  "Ready": "Hazır",
+  "Needs Review": "İnceleme Gerekli",
+  "Low": "Düşük",
+  "Medium": "Orta",
+  "High": "Yüksek",
+  "Thinking": "Düşünüyor",
+  "Send": "Gönder",
+  "Why? Ask about this score": "Neden? Bu puan hakkında sor",
+  "AI is thinking...": "YZ düşünüyor...",
+  "You": "Siz",
+  "Select a candidate, then ask why the score looks high or low.": "Bir aday seçin, sonra puanın neden yüksek veya düşük olduğunu sorun.",
+  "Unable to explain score": "Puan açıklanamadı",
+  "Score explanation": "Puan açıklaması",
+  "score explanation": "puan açıklaması",
+  "Score:": "Puan:",
+  "Recommendation:": "Öneri:",
+  "Strongest signal:": "En güçlü sinyal:",
+  "Main concern:": "Temel risk:",
+  "Experience:": "Deneyim:",
+  "Recruiter action:": "İK aksiyonu:",
+  "Question interpreted:": "Yorumlanan soru:",
+  "Move to interview quickly.": "Hızlıca mülakata ilerletin.",
+  "Review the concern before final decision.": "Nihai karar öncesi temel riski gözden geçirin.",
+  "No blocking concern is currently flagged.": "Şu anda kritik bir engel işaretlenmedi.",
+  "Senior AI Engineer": "Kıdemli YZ Mühendisi",
+  "Frontend Platform Developer": "Frontend Platform Geliştiricisi",
+  "Full Stack Engineer": "Full Stack Mühendisi",
+  "Data Analyst": "Veri Analisti",
+  "Junior Developer": "Junior Geliştirici",
+  "Python competency": "Python yetkinliği",
+  "90% match": "%90 eşleşme",
+  "Must-have backend and AI skill is strongly evidenced in recent projects.": "Olmazsa olmaz backend ve YZ becerisi son projelerde güçlü şekilde görülüyor.",
+  "Experience duration": "Deneyim süresi",
+  "+1.5 years": "+1.5 yıl",
+  "Experience exceeds the role baseline of 5 years.": "Deneyim, rol için belirlenen 5 yıl tabanının üstünde.",
+  "Project relevance": "Proje uygunluğu",
+  "Built LLM matching and extraction flows similar to RecruitAI scope.": "RecruitAI kapsamına benzer LLM eşleştirme ve çıkarım akışları geliştirmiş.",
+  "Dashboard delivery": "Panel teslimatı",
+  "Strong": "Güçlü",
+  "Built recruiter workflow screens with upload, status, and quality monitoring.": "Yükleme, durum ve kalite takibi içeren işe alım ekranlarını geliştirmiş.",
+  "Testing coverage": "Test kapsamı",
+  "98%+ statements": "%98+ satır kapsamı",
+  "Added automated frontend coverage for login and PDF upload workflows.": "Giriş ve PDF yükleme akışları için otomatik frontend kapsamı eklemiş.",
+  "Backend depth": "Backend derinliği",
+  "Needs follow-up": "Takip gerekli",
+  "Backend API ownership is not the primary evidence in the current profile.": "Mevcut profilde backend API sahipliği ana kanıt değil.",
+  "Full stack coverage": "Full stack kapsama",
+  "Good": "İyi",
+  "Matches API, dashboard, and data persistence expectations.": "API, panel ve veri kalıcılığı beklentileriyle uyumlu.",
+  "AI specialization": "YZ uzmanlığı",
+  "Moderate": "Orta",
+  "CV has fewer direct NLP or LLM project signals.": "CV içinde doğrudan NLP veya LLM proje sinyali daha az.",
+  "Data analysis": "Veri analizi",
+  "Good evidence for KPI dashboards and reporting workflows.": "KPI panelleri ve raporlama akışları için iyi kanıt var.",
+  "Product engineering": "Ürün mühendisliği",
+  "Gap": "Eksik",
+  "Less evidence for production frontend or API implementation.": "Prod frontend veya API geliştirme için daha az kanıt var.",
+  "Below baseline": "Tabanın altında",
+  "Current profile is below the minimum experience level for this role.": "Mevcut profil bu rol için minimum deneyim seviyesinin altında.",
+  "Skill match": "Yetenek uyumu",
+  "Partial": "Kısmi",
+  "Frontend basics are present but AI/dashboard production evidence is limited.": "Frontend temelleri mevcut ancak YZ/panel üretim kanıtı sınırlı."
+};
+
+function translateContent(value, locale) {
+  if (locale !== "tr") return value;
+
+  let output = String(value);
+  Object.entries(TR_TRANSLATIONS)
+    .sort((left, right) => right[0].length - left[0].length)
+    .forEach(([source, target]) => {
+    output = output.replaceAll(source, target);
+    });
+  return output;
+}
+
+function applyLocale(root, state) {
+  if (!root) return;
+
+  const locale = state?.locale || "en";
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) {
+    nodes.push(walker.currentNode);
+  }
+
+  nodes.forEach((node) => {
+    if (!node.nodeValue || !node.nodeValue.trim()) return;
+    node.nodeValue = translateContent(node.nodeValue, locale);
+  });
+
+  root.querySelectorAll("input[placeholder]").forEach((input) => {
+    input.placeholder = translateContent(input.placeholder, locale);
+  });
+}
+
 function getApiBaseUrl() {
   if (typeof window === "undefined" || !window.location) {
     return "http://127.0.0.1:8000";
@@ -176,6 +339,7 @@ const DEMO_CANDIDATES = [
 
 function createInitialState() {
   return {
+    locale: "en",
     session: null,
     activeView: "login",
     selectedFile: null,
@@ -393,14 +557,19 @@ function createRecruiterWorkflow(options = {}) {
     root,
     render() {
       if (!root) return;
+      if (typeof window !== "undefined") {
+        window.__recruitAiLocale = state.locale;
+      }
       if (!state.session) {
         root.innerHTML = loginView(state);
         this.bindLogin();
+        applyLocale(root, state);
         return;
       }
 
       root.innerHTML = dashboardView(state);
       this.bindDashboard();
+      applyLocale(root, state);
     },
     bindLogin() {
       const form = root.querySelector("#loginForm");
@@ -413,6 +582,11 @@ function createRecruiterWorkflow(options = {}) {
           role: root.querySelector("#role").value,
         });
       });
+
+      const localeToggle = root.querySelector("#localeToggle");
+      if (localeToggle) {
+        localeToggle.addEventListener("click", () => this.toggleLocale());
+      }
     },
     bindDashboard() {
       const logoutButton = root.querySelector("#logoutButton");
@@ -489,6 +663,11 @@ function createRecruiterWorkflow(options = {}) {
       const chatToggle = root.querySelector("#chatToggle");
       if (chatToggle) {
         chatToggle.addEventListener("click", () => this.toggleChat());
+      }
+
+      const localeToggle = root.querySelector("#localeToggle");
+      if (localeToggle) {
+        localeToggle.addEventListener("click", () => this.toggleLocale());
       }
     },
     handleLogin(credentials) {
@@ -599,6 +778,15 @@ function createRecruiterWorkflow(options = {}) {
       state.chat.isOpen = !state.chat.isOpen;
       this.render();
     },
+    toggleLocale() {
+      state.locale = state.locale === "en" ? "tr" : "en";
+      if (state.chat.messages.length === 1) {
+        state.chat.messages[0].content = state.locale === "tr"
+          ? translateContent("Select a candidate, then ask why the score looks high or low.", "tr")
+          : "Select a candidate, then ask why the score looks high or low.";
+      }
+      this.render();
+    },
     async askAI(question, candidateId = state.selectedCandidateId) {
       // Interactive Logic: Explainability Chat Engine
       const candidate = state.candidates.find((item) => item.id === candidateId);
@@ -623,7 +811,7 @@ function createRecruiterWorkflow(options = {}) {
         });
         state.chat.messages.push({
           role: "assistant",
-          content: normalizeAiAnswer(response),
+          content: normalizeAiAnswer(response, state.locale),
         });
         state.chat.isLoading = false;
         this.render();
@@ -730,6 +918,7 @@ function loginView(state) {
           </select>
         </label>
 
+        <button id="localeToggle" type="button" class="primary-action">${state.locale === "en" ? "TR" : "EN"}</button>
         <button type="submit" class="primary-action">Continue</button>
         <p class="form-note">Role-based routing is mocked for Sprint 1 and ready for API integration.</p>
       </form>
@@ -768,7 +957,10 @@ function dashboardView(state) {
             <h1>Recruiter Dashboard</h1>
             <span class="topbar-note">CV Intake and Parsing Monitor</span>
           </div>
-          <span class="role-pill">Recruiter</span>
+          <div>
+            <button id="localeToggle" type="button" class="primary-action">${state.locale === "en" ? "TR" : "EN"}</button>
+            <span class="role-pill">Recruiter</span>
+          </div>
         </header>
 
         ${state.error ? `<p class="error-banner" role="alert">${escapeHtml(state.error)}</p>` : ""}
@@ -1142,7 +1334,8 @@ function statusClass(status) {
 }
 
 function formatDate(value) {
-  return new Intl.DateTimeFormat("en", { month: "short", day: "2-digit" }).format(new Date(value));
+  const locale = typeof window !== "undefined" ? window.__recruitAiLocale || "en" : "en";
+  return new Intl.DateTimeFormat(locale === "tr" ? "tr-TR" : "en", { month: "short", day: "2-digit" }).format(new Date(value));
 }
 
 function buildCandidateExplainPayload(candidate) {
@@ -1158,10 +1351,10 @@ function buildCandidateExplainPayload(candidate) {
   };
 }
 
-function normalizeAiAnswer(response) {
+function normalizeAiAnswer(response, locale = "en") {
   if (typeof response === "string") return response;
-  if (response && typeof response.answer === "string") return response.answer;
-  return "### Score explanation\nThe AI service returned an empty explanation.";
+  if (response && typeof response.answer === "string") return translateContent(response.answer, locale);
+  return translateContent("### Score explanation\nThe AI service returned an empty explanation.", locale);
 }
 
 function renderMarkdown(value) {
