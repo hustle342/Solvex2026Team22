@@ -1,0 +1,6 @@
+week_id,sprint_id,kpi_name,baseline_value,current_value,target_value,unit,status_rag,data_source,owner,notes
+2026-W19,Sprint-0,Manual Screening Effort Reduction,0,NA,50,percent,Amber,Time study logs,Serdar,Baseline setup week
+2026-W19,Sprint-0,CV Parse Critical Field Accuracy,NA,NA,90,percent,Amber,Eval dataset,Samet,Baseline not locked yet
+2026-W19,Sprint-0,Precision@10,NA,NA,0.75,ratio,Amber,Ranked eval set,Samet,Baseline not locked yet
+2026-W19,Sprint-0,Median Time-to-Shortlist,NA,NA,5,minutes,Amber,System event logs,Cemilcan,Baseline not locked yet
+2026-W19,Sprint-0,Recruiter Acceptance Rate,NA,NA,60,percent,Amber,Dashboard decision actions,Cemilcan,Baseline not locked yet
