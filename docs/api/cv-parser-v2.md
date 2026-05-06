@@ -155,7 +155,137 @@ curl -X POST "http://localhost:8000/api/v1/match/explain" \
 
 ---
 
-## 5. Confidence Scoring Algorithm
+## 5. Markdown Knowledge Base + Chat API
+
+These endpoints power the MVP Markdown candidate knowledge base and the dashboard chat panel with `@mention` support. Candidate files are stored under `storage/markdown/candidates`.
+
+### 5.1. Mention Candidate Search
+`GET /api/v1/knowledge/mentions?q=cem`
+
+Returns candidate mention options from Markdown files.
+
+**Response (200 OK):**
+```json
+[
+  {
+    "id": "cand-002",
+    "label": "Cemocan Demir",
+    "type": "candidate",
+    "path": "storage/markdown/candidates/cand-002-cemocan-demir.md"
+  }
+]
+```
+
+**curl Example:**
+```bash
+curl "http://localhost:8000/api/v1/knowledge/mentions?q=cem"
+```
+
+### 5.2. Create Candidate Markdown
+`POST /api/v1/knowledge/candidates/{candidate_id}/markdown`
+
+Creates or overwrites a Markdown knowledge file for one candidate. The request can send a dashboard-style candidate object directly or wrap it in a `candidate` field.
+
+**Request:**
+```json
+{
+  "name": "Cemocan Demir",
+  "title": "Frontend Platform Developer",
+  "score": 88,
+  "experienceYears": 4.2,
+  "skills": ["JavaScript", "CSS", "Dashboard UX", "Testing", "API Integration"],
+  "recommendation": "Review",
+  "factors": [
+    {
+      "label": "Testing coverage",
+      "impact": "positive",
+      "detail": "Added automated frontend coverage for recruiter workflows."
+    },
+    {
+      "label": "Backend depth",
+      "impact": "negative",
+      "detail": "Backend API ownership needs follow-up."
+    }
+  ]
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "path": "storage/markdown/candidates/cand-002-cemocan-demir.md",
+  "markdown": "# Cemocan Demir\n\n## Role\nFrontend Platform Developer\n..."
+}
+```
+
+**curl Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/knowledge/candidates/cand-002/markdown" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Cemocan Demir",
+    "title": "Frontend Platform Developer",
+    "score": 88,
+    "experienceYears": 4.2,
+    "skills": ["JavaScript", "CSS", "Dashboard UX", "Testing", "API Integration"],
+    "recommendation": "Review"
+  }'
+```
+
+### 5.3. Chat Query
+`POST /api/v1/chat/query`
+
+Answers with deterministic Markdown. If `mentions` are supplied, the mentioned Markdown files are used as context. If there are no mentions, the message is treated as a natural language candidate search.
+
+**Request with mention:**
+```json
+{
+  "message": "@cemocan backend tarafi yeterli mi?",
+  "mentions": ["cand-002"]
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "answer": "### Cemocan Demir\nScore: 88/100. Recommendation: Review.\n- Skills: JavaScript, CSS, Dashboard UX...\n\nSources: storage/markdown/candidates/cand-002-cemocan-demir.md",
+  "sources": ["storage/markdown/candidates/cand-002-cemocan-demir.md"],
+  "candidates": [
+    {
+      "id": "cand-002",
+      "label": "Cemocan Demir",
+      "type": "candidate",
+      "path": "storage/markdown/candidates/cand-002-cemocan-demir.md",
+      "candidateScore": 88,
+      "experienceYears": 4.2,
+      "skills": ["JavaScript", "CSS", "Dashboard UX", "Testing", "API Integration"],
+      "recommendation": "Review"
+    }
+  ]
+}
+```
+
+**Natural language search request:**
+```json
+{
+  "message": "Bana Python, FastAPI ve NLP bilen 5+ yil deneyimli biri lazim",
+  "mentions": []
+}
+```
+
+**curl Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/chat/query" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Bana Python, FastAPI ve NLP bilen 5+ yil deneyimli biri lazim",
+    "mentions": []
+  }'
+```
+
+---
+
+## 6. Confidence Scoring Algorithm
 The parser evaluates the reliability of its output on a `0.0` to `1.0` scale.
 
 **Weights:**
@@ -170,7 +300,7 @@ The parser evaluates the reliability of its output on a `0.0` to `1.0` scale.
 
 ---
 
-## 6. Technical Validation Note
+## 7. Technical Validation Note
 **Coverage:** 91% (60+ unit tests passing)
 **Resilience:** Timeouts applied globally to `_extract_text` and per-page for `_ocr_page`.
 **Performance:** Average clean-PDF parse time < 0.5s.

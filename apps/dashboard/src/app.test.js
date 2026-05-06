@@ -1,15 +1,21 @@
 const {
   authenticate,
   buildCandidateExplainPayload,
+  buildLocalChatResponse,
   createRecruiterWorkflow,
   defaultAskAiApi,
   defaultAuthService,
   defaultCandidateActionApi,
+  defaultMentionApi,
   escapeHtml,
+  getActiveMentionQuery,
   getSkillOptions,
   getVisibleCandidates,
+  localCandidateSearch,
+  localMentionSearch,
   normalizeAiAnswer,
   renderMarkdown,
+  replaceActiveMention,
   statusClass,
   validatePdfFile,
 } = require("./app");
@@ -642,11 +648,11 @@ describe("RecruitAI Ask AI explainability chat", () => {
     controller.render();
 
     expect(controller.root.textContent).toContain("Ask AI");
-    expect(controller.root.querySelector("#aiChatInput").placeholder).toContain("Neden?");
+    expect(controller.root.querySelector("#aiChatInput").placeholder).toContain("@Cemocan");
     expect(controller.root.querySelector('[data-question="Explain this score"]')).not.toBeNull();
   });
 
-  test("Ask AI sends candidate score context and removes loading state after response", async () => {
+  test("Ask AI sends mention context and removes loading state after response", async () => {
     let resolveRequest;
     const askAiApi = jest.fn(
       () =>
@@ -664,18 +670,16 @@ describe("RecruitAI Ask AI explainability chat", () => {
     expect(controller.root.textContent).toContain("AI is thinking...");
     expect(askAiApi).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: "Neden bu puan?",
+        message: "Neden bu puan?",
         source: "recruiter-dashboard",
-        candidate: expect.objectContaining({
-          id: "cand-002",
-          score: 88,
-          factors: expect.any(Array),
-        }),
+        mentions: ["cand-002"],
+        candidates: expect.any(Array),
       })
     );
 
     resolveRequest({
       answer: "### Cemocan score explanation\n- Strong frontend evidence\n- Review backend depth",
+      sources: ["storage/markdown/candidates/cand-002-cemocan-demir.md"],
     });
     await pending;
 
@@ -683,6 +687,7 @@ describe("RecruitAI Ask AI explainability chat", () => {
     expect(controller.root.textContent).not.toContain("AI is thinking...");
     expect(controller.root.textContent).toContain("Cemocan score explanation");
     expect(controller.root.textContent).toContain("Strong frontend evidence");
+    expect(controller.root.textContent).toContain("cand-002-cemocan-demir.md");
   });
 
   test("Explain this score button opens chat for the selected candidate", async () => {
@@ -696,15 +701,15 @@ describe("RecruitAI Ask AI explainability chat", () => {
 
     expect(askAiApi).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: "Explain this score",
-        candidate: expect.objectContaining({ id: "cand-001" }),
+        message: "Explain this score",
+        mentions: ["cand-001"],
       })
     );
     expect(controller.root.textContent).toContain("Score is driven by skill fit.");
   });
 
-  test("manual chat submit sends typed question", async () => {
-    const askAiApi = jest.fn(() => Promise.resolve({ answer: "### Manual answer\n- Because score factors are strong." }));
+  test("manual chat submit sends typed natural language query without implicit mention", async () => {
+    const askAiApi = jest.fn(() => Promise.resolve({ answer: "### Candidate recommendations\n- Ayse Yilmaz fits." }));
     const controller = makeController({ askAiApi });
     controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
     controller.render();
@@ -713,8 +718,57 @@ describe("RecruitAI Ask AI explainability chat", () => {
     controller.root.querySelector("#aiChatForm").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await Promise.resolve();
 
-    expect(askAiApi).toHaveBeenCalledWith(expect.objectContaining({ question: "Neden?" }));
-    expect(controller.root.textContent).toContain("Manual answer");
+    expect(askAiApi).toHaveBeenCalledWith(expect.objectContaining({ message: "Neden?", mentions: [] }));
+    expect(controller.root.textContent).toContain("Candidate recommendations");
+  });
+
+  test("@ opens mention suggestions near chat input", async () => {
+    const mentionApi = jest.fn(() =>
+      Promise.resolve([{ id: "cand-002", label: "Cemocan Demir", type: "candidate", path: "storage/cand-002.md" }])
+    );
+    const controller = makeController({ mentionApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.root.querySelector("#aiChatInput").value = "@cem";
+    controller.root.querySelector("#aiChatInput").dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+
+    expect(mentionApi).toHaveBeenCalledWith("cem");
+    expect(controller.root.querySelector(".mention-menu").textContent).toContain("Cemocan Demir");
+  });
+
+  test("selecting a mention updates input and mention state", async () => {
+    const mentionApi = jest.fn(() =>
+      Promise.resolve([{ id: "cand-002", label: "Cemocan Demir", type: "candidate", path: "storage/cand-002.md" }])
+    );
+    const controller = makeController({ mentionApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    await controller.updateChatInput("@cem");
+    controller.root.querySelector('[data-mention-id="cand-002"]').click();
+
+    expect(controller.state.chat.input).toBe("@Cemocan Demir ");
+    expect(controller.state.chat.mentions).toEqual(["cand-002"]);
+    expect(controller.root.querySelector(".mention-tokens").textContent).toContain("@cand-002");
+  });
+
+  test("natural language candidate search response renders in chat panel", async () => {
+    const askAiApi = jest.fn(() =>
+      Promise.resolve({
+        answer: "### Candidate recommendations\n- 1. Ayse Yilmaz - Python, FastAPI, NLP.",
+        candidates: [{ id: "cand-001", label: "Ayse Yilmaz" }],
+      })
+    );
+    const controller = makeController({ askAiApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    await controller.askAI("Bana Python, FastAPI ve NLP bilen 5+ yil deneyimli biri lazim", null);
+
+    expect(controller.root.textContent).toContain("Candidate recommendations");
+    expect(controller.root.textContent).toContain("Ayse Yilmaz");
   });
 
   test("chat shows service errors as assistant messages", async () => {
@@ -742,7 +796,7 @@ describe("RecruitAI Ask AI explainability chat", () => {
     expect(controller.root.querySelector("#aiChatInput")).toBeNull();
   });
 
-  test("default Ask AI API posts to explain endpoint", async () => {
+  test("default Ask AI API posts to chat endpoint", async () => {
     const originalFetch = global.fetch;
     global.fetch = jest.fn(() =>
       Promise.resolve({
@@ -752,14 +806,14 @@ describe("RecruitAI Ask AI explainability chat", () => {
     );
 
     const response = await defaultAskAiApi({
-      question: "Explain this score",
-      candidate: buildCandidateExplainPayload(createRecruiterWorkflow().state.candidates[0]),
+      message: "Explain this score",
+      mentions: ["cand-001"],
       source: "recruiter-dashboard",
     });
 
     expect(response.answer).toBe("### API answer");
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/v1/match/explain",
+      "/api/v1/chat/query",
       expect.objectContaining({
         method: "POST",
         body: expect.stringContaining("Explain this score"),
@@ -774,11 +828,39 @@ describe("RecruitAI Ask AI explainability chat", () => {
 
     await expect(
       defaultAskAiApi({
-        question: "Explain this score",
-        candidate: buildCandidateExplainPayload(createRecruiterWorkflow().state.candidates[0]),
+        message: "Explain this score",
+        mentions: ["cand-001"],
       })
     ).rejects.toThrow("Ask AI failed with 500");
     global.fetch = originalFetch;
+  });
+
+  test("default mention API calls knowledge mentions endpoint", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve([{ id: "cand-002", label: "Cemocan Demir" }]),
+      })
+    );
+
+    const response = await defaultMentionApi("cem");
+
+    expect(response[0].label).toBe("Cemocan Demir");
+    expect(global.fetch).toHaveBeenCalledWith("/api/v1/knowledge/mentions?q=cem");
+    global.fetch = originalFetch;
+  });
+
+  test("local mention and search helpers rank demo candidates", () => {
+    expect(localMentionSearch("cem")[0].label).toBe("Cemocan Demir");
+    expect(localCandidateSearch("Python FastAPI NLP 5+ yil")[0].name).toBe("Ayse Yilmaz");
+    expect(buildLocalChatResponse({ message: "@cem", mentions: ["cand-002"] }).sources[0]).toContain("cand-002");
+  });
+
+  test("mention query helpers parse and replace active token", () => {
+    expect(getActiveMentionQuery("hello @cem")).toBe("cem");
+    expect(getActiveMentionQuery("hello @cem test")).toBeNull();
+    expect(replaceActiveMention("hello @cem", "Cemocan Demir")).toBe("hello @Cemocan Demir ");
   });
 
   test("markdown renderer escapes unsafe content and renders bullets", () => {

@@ -620,6 +620,7 @@ button:focus-visible {
   border-radius: 8px;
   background: #fff;
   padding: 10px 12px;
+  overflow-wrap: anywhere;
 }
 
 .chat-message.user > div {
@@ -667,6 +668,13 @@ button:focus-visible {
   animation: spin 800ms linear infinite;
 }
 
+.chat-sources {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .chat-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -677,6 +685,75 @@ button:focus-visible {
 
 .chat-form .primary-action {
   min-height: 44px;
+}
+
+.chat-input-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.mention-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  overflow: auto;
+  max-height: 190px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.mention-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.mention-menu button:hover,
+.mention-menu button:focus-visible {
+  background: #f0fdfa;
+}
+
+.mention-menu button:last-child {
+  border-bottom: 0;
+}
+
+.mention-menu strong,
+.mention-menu span {
+  overflow-wrap: anywhere;
+}
+
+.mention-menu span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mention-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.mention-tokens span {
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #075985;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 @keyframes spin {

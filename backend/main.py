@@ -15,13 +15,16 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.core.config import get_settings
 from backend.api.upload import router as upload_router, init_upload_deps
 from backend.api.match import router as match_router
+from backend.api.chat import router as chat_router
 
 # ── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -75,6 +78,11 @@ def create_app() -> FastAPI:
     # ── Routers ────────────────────────────────────────────────────
     app.include_router(upload_router, prefix=settings.API_PREFIX)
     app.include_router(match_router, prefix=settings.API_PREFIX)
+    app.include_router(chat_router, prefix=settings.API_PREFIX)
+
+    dashboard_dir = Path(__file__).resolve().parent.parent / "apps" / "dashboard"
+    if dashboard_dir.exists():
+        app.mount("/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard")
 
     # ── Health check ───────────────────────────────────────────────
     @app.get("/health", tags=["system"])

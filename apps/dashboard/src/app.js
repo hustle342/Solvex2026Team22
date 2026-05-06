@@ -177,10 +177,13 @@ function createInitialState() {
       isOpen: true,
       isLoading: false,
       input: "",
+      mentions: [],
+      mentionQuery: "",
+      mentionOptions: [],
       messages: [
         {
           role: "assistant",
-          content: "Select a candidate, then ask why the score looks high or low.",
+          content: "Ask about candidates with @mentions, or describe the profile you need.",
         },
       ],
     },
@@ -294,16 +297,12 @@ async function defaultCandidateActionApi(candidateId, action) {
 }
 
 async function defaultAskAiApi(payload) {
-  const endpoint = "/api/v1/match/explain";
+  const endpoint = "/api/v1/chat/query";
   const isStaticDemo =
     typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
 
   if (isStaticDemo || typeof fetch === "undefined") {
-    return {
-      answer: buildLocalScoreExplanation(payload.candidate, payload.question),
-      endpoint,
-      demo: true,
-    };
+    return buildLocalChatResponse(payload, DEMO_CANDIDATES, endpoint);
   }
 
   const response = await fetch(endpoint, {
@@ -316,6 +315,22 @@ async function defaultAskAiApi(payload) {
 
   if (!response.ok) {
     throw new Error(`Ask AI failed with ${response.status}`);
+  }
+  return response.json();
+}
+
+async function defaultMentionApi(query, candidates = DEMO_CANDIDATES) {
+  const endpoint = `/api/v1/knowledge/mentions?q=${encodeURIComponent(query || "")}`;
+  const isStaticDemo =
+    typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
+
+  if (isStaticDemo || typeof fetch === "undefined") {
+    return localMentionSearch(query, candidates);
+  }
+
+  const response = await fetch(endpoint);
+  if (!response.ok) {
+    throw new Error(`Mention search failed with ${response.status}`);
   }
   return response.json();
 }
@@ -336,6 +351,101 @@ function buildLocalScoreExplanation(candidate, question = "") {
     "",
     question ? `Question interpreted: ${question}` : "Question interpreted: Explain this score.",
   ].join("\n");
+}
+
+function buildLocalChatResponse(payload, candidates = DEMO_CANDIDATES, endpoint = "demo") {
+  const message = payload.message || payload.question || "";
+  const mentions = payload.mentions || [];
+  const mentionedCandidates = candidates.filter((candidate) => mentions.includes(candidate.id));
+  if (mentionedCandidates.length) {
+    const answer = mentionedCandidates
+      .map((candidate) => buildLocalScoreExplanation(candidate, message))
+      .join("\n\n");
+    return {
+      answer: `${answer}\n\nSources: ${mentionedCandidates.map((candidate) => markdownPathForCandidate(candidate)).join(", ")}`,
+      sources: mentionedCandidates.map((candidate) => markdownPathForCandidate(candidate)),
+      candidates: mentionedCandidates.map(candidateToChatResult),
+      endpoint,
+      demo: true,
+    };
+  }
+
+  const matches = localCandidateSearch(message, candidates);
+  return {
+    answer: buildLocalCandidateSearchAnswer(message, matches),
+    sources: matches.map((candidate) => markdownPathForCandidate(candidate)),
+    candidates: matches.map(candidateToChatResult),
+    endpoint,
+    demo: true,
+  };
+}
+
+function localMentionSearch(query, candidates = DEMO_CANDIDATES) {
+  const normalizedQuery = normalizeSearchText(query);
+  return candidates
+    .filter((candidate) => {
+      const haystack = normalizeSearchText(`${candidate.id} ${candidate.name} ${candidate.title}`);
+      return !normalizedQuery || haystack.includes(normalizedQuery);
+    })
+    .slice(0, 6)
+    .map((candidate) => ({
+      id: candidate.id,
+      label: candidate.name,
+      type: "candidate",
+      path: markdownPathForCandidate(candidate),
+    }));
+}
+
+function localCandidateSearch(message, candidates = DEMO_CANDIDATES) {
+  const tokens = extractSearchTokens(message);
+  const minYears = extractMinYears(message);
+  return candidates
+    .map((candidate) => {
+      const haystack = normalizeSearchText(`${candidate.name} ${candidate.title} ${candidate.skills.join(" ")} ${candidate.recommendation}`);
+      const matchedSkills = candidate.skills.filter((skill) => tokens.includes(normalizeSearchText(skill)));
+      const tokenHits = tokens.filter((token) => haystack.includes(token)).length;
+      let matchScore = tokenHits * 12 + matchedSkills.length * 18 + candidate.score / 10;
+      if (minYears !== null) {
+        matchScore += candidate.experienceYears >= minYears ? 20 : -25;
+      }
+      return { ...candidate, matchScore: Number(matchScore.toFixed(2)), matchedSkills };
+    })
+    .filter((candidate) => candidate.matchScore > 0)
+    .sort((a, b) => b.matchScore - a.matchScore || b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, 5);
+}
+
+function buildLocalCandidateSearchAnswer(message, candidates) {
+  if (!candidates.length) {
+    return "### Candidate recommendations\n- No demo candidate matched this request.\n\nSources: Not provided";
+  }
+  return [
+    "### Candidate recommendations",
+    ...candidates.map((candidate, index) => {
+      const skills = candidate.matchedSkills.length ? candidate.matchedSkills.join(", ") : candidate.skills.slice(0, 4).join(", ");
+      return `- ${index + 1}. ${candidate.name} - match ${candidate.matchScore}, profile score ${candidate.score}/100, ${candidate.experienceYears} years. Skills: ${skills}. Recommendation: ${candidate.recommendation}.`;
+    }),
+    "",
+    `Question interpreted: ${message}`,
+    `Sources: ${candidates.map((candidate) => markdownPathForCandidate(candidate)).join(", ")}`,
+  ].join("\n");
+}
+
+function candidateToChatResult(candidate) {
+  return {
+    id: candidate.id,
+    label: candidate.name,
+    type: "candidate",
+    path: markdownPathForCandidate(candidate),
+    candidateScore: candidate.score,
+    experienceYears: candidate.experienceYears,
+    skills: candidate.skills,
+    recommendation: candidate.recommendation,
+  };
+}
+
+function markdownPathForCandidate(candidate) {
+  return `storage/markdown/candidates/${slugify(`${candidate.id}-${candidate.name}`)}.md`;
 }
 
 function getSkillOptions(candidates) {
@@ -368,6 +478,7 @@ function createRecruiterWorkflow(options = {}) {
   const authService = options.authService || defaultAuthService;
   const candidateActionApi = options.candidateActionApi || defaultCandidateActionApi;
   const askAiApi = options.askAiApi || defaultAskAiApi;
+  const mentionApi = options.mentionApi || ((query) => defaultMentionApi(query, state.candidates));
   const timerApi = options.timerApi || (typeof window !== "undefined" ? window : globalThis);
   const clock = options.clock || (() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
   const state = options.state || createInitialState();
@@ -469,6 +580,17 @@ function createRecruiterWorkflow(options = {}) {
           this.askAI(input.value);
         });
       }
+
+      const chatInput = root.querySelector("#aiChatInput");
+      if (chatInput) {
+        chatInput.addEventListener("input", () => {
+          this.updateChatInput(chatInput.value);
+        });
+      }
+
+      root.querySelectorAll("[data-mention-id]").forEach((button) => {
+        button.addEventListener("click", () => this.selectMention(button.dataset.mentionId, button.dataset.mentionLabel));
+      });
 
       const chatToggle = root.querySelector("#chatToggle");
       if (chatToggle) {
@@ -583,16 +705,47 @@ function createRecruiterWorkflow(options = {}) {
       state.chat.isOpen = !state.chat.isOpen;
       this.render();
     },
-    async askAI(question, candidateId = state.selectedCandidateId) {
-      // Interactive Logic: Explainability Chat Engine
-      const candidate = state.candidates.find((item) => item.id === candidateId);
-      const prompt = String(question || "").trim() || "Explain this score";
-      if (!candidate || state.chat.isLoading) return false;
+    async updateChatInput(value) {
+      state.chat.input = value;
+      const mentionQuery = getActiveMentionQuery(value);
+      state.chat.mentionQuery = mentionQuery || "";
+      state.chat.mentionOptions = [];
+      if (mentionQuery === null) {
+        return false;
+      }
+      try {
+        state.chat.mentionOptions = await mentionApi(mentionQuery);
+      } catch (error) {
+        state.chat.mentionOptions = localMentionSearch(mentionQuery, state.candidates);
+      }
+      this.render();
+      return true;
+    },
+    selectMention(candidateId, label) {
+      const option = state.chat.mentionOptions.find((item) => item.id === candidateId) || { id: candidateId, label };
+      if (!option.id) return false;
+      state.chat.mentions = Array.from(new Set([...state.chat.mentions, option.id]));
+      state.chat.input = replaceActiveMention(state.chat.input, option.label || option.id);
+      state.chat.mentionQuery = "";
+      state.chat.mentionOptions = [];
+      this.render();
+      return true;
+    },
+    async askAI(question, candidateId = null) {
+      const explicitCandidate = candidateId ? state.candidates.find((item) => item.id === candidateId) : null;
+      const prompt = String(question || "").trim() || "Find matching candidates";
+      const mentions = Array.from(new Set([...(state.chat.mentions || []), ...(explicitCandidate ? [explicitCandidate.id] : [])]));
+      if (state.chat.isLoading) return false;
 
-      state.selectedCandidateId = candidate.id;
+      if (explicitCandidate) {
+        state.selectedCandidateId = explicitCandidate.id;
+      }
       state.chat.isOpen = true;
       state.chat.isLoading = true;
       state.chat.input = "";
+      state.chat.mentions = [];
+      state.chat.mentionQuery = "";
+      state.chat.mentionOptions = [];
       state.chat.messages.push({
         role: "user",
         content: prompt,
@@ -601,13 +754,16 @@ function createRecruiterWorkflow(options = {}) {
 
       try {
         const response = await askAiApi({
-          question: prompt,
-          candidate: buildCandidateExplainPayload(candidate),
+          message: prompt,
+          mentions,
+          candidates: state.candidates.map(buildCandidateExplainPayload),
           source: "recruiter-dashboard",
         });
         state.chat.messages.push({
           role: "assistant",
           content: normalizeAiAnswer(response),
+          sources: Array.isArray(response.sources) ? response.sources : [],
+          candidates: Array.isArray(response.candidates) ? response.candidates : [],
         });
         state.chat.isLoading = false;
         this.render();
@@ -957,9 +1113,13 @@ function chatPanel(state) {
                 ${state.chat.isLoading ? `<div class="chat-loading"><span></span>AI is thinking...</div>` : ""}
               </div>
               <form id="aiChatForm" class="chat-form">
-                <input id="aiChatInput" type="text" value="${escapeHtml(
-                  state.chat.input
-                )}" placeholder="Neden? Ask about this score" ${state.chat.isLoading ? "disabled" : ""}>
+                <div class="chat-input-wrap">
+                  <input id="aiChatInput" type="text" value="${escapeHtml(
+                    state.chat.input
+                  )}" placeholder="Ask @Cemocan or describe a role" ${state.chat.isLoading ? "disabled" : ""}>
+                  ${mentionDropdown(state.chat)}
+                  ${selectedMentionTokens(state.chat)}
+                </div>
                 <button class="primary-action" type="submit" ${state.chat.isLoading ? "disabled" : ""}>Send</button>
               </form>
             </div>
@@ -974,8 +1134,36 @@ function chatMessage(message) {
     <article class="chat-message ${message.role}">
       <span>${message.role === "user" ? "You" : "AI"}</span>
       <div>${renderMarkdown(message.content)}</div>
+      ${message.sources && message.sources.length ? `<small class="chat-sources">Sources: ${message.sources.map(escapeHtml).join(", ")}</small>` : ""}
     </article>
   `;
+}
+
+function mentionDropdown(chat) {
+  if (!chat.mentionOptions || !chat.mentionOptions.length) return "";
+  return `
+    <div class="mention-menu" role="listbox">
+      ${chat.mentionOptions
+        .map(
+          (option) => `
+            <button type="button" role="option" data-mention-id="${escapeHtml(option.id)}" data-mention-label="${escapeHtml(
+            option.label
+          )}">
+              <strong>${escapeHtml(option.label)}</strong>
+              <span>${escapeHtml(option.type || "candidate")}</span>
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function selectedMentionTokens(chat) {
+  if (!chat.mentions || !chat.mentions.length) return "";
+  return `<div class="mention-tokens">${chat.mentions
+    .map((mention) => `<span>@${escapeHtml(mention)}</span>`)
+    .join("")}</div>`;
 }
 
 function decisionBadge(status) {
@@ -1148,6 +1336,47 @@ function normalizeAiAnswer(response) {
   return "### Score explanation\nThe AI service returned an empty explanation.";
 }
 
+function getActiveMentionQuery(value) {
+  const match = String(value || "").match(/@([^\s@]*)$/);
+  return match ? match[1] : null;
+}
+
+function replaceActiveMention(value, label) {
+  return String(value || "").replace(/@([^\s@]*)$/, `@${label} `);
+}
+
+function extractSearchTokens(value) {
+  const stopwords = new Set(["bana", "bilen", "bir", "ve", "lazim", "lazım", "deneyimli", "yil", "yıl", "years"]);
+  return normalizeSearchText(value)
+    .split(/[^a-z0-9.+#-]+/)
+    .filter((token) => token.length > 1 && !stopwords.has(token) && !/^\d+$/.test(token));
+}
+
+function extractMinYears(value) {
+  const match = normalizeSearchText(value).match(/(\d+(?:[.,]\d+)?)\s*\+?\s*(?:years?|yrs?|yil|yıl)/);
+  return match ? Number(match[1].replace(",", ".")) : null;
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replaceAll("ı", "i")
+    .replaceAll("ğ", "g")
+    .replaceAll("ü", "u")
+    .replaceAll("ş", "s")
+    .replaceAll("ö", "o")
+    .replaceAll("ç", "c");
+}
+
+function slugify(value) {
+  return normalizeSearchText(value)
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function renderMarkdown(value) {
   const escaped = escapeHtml(value);
   const lines = escaped.split("\n");
@@ -1200,8 +1429,12 @@ function escapeHtml(value) {
 /* istanbul ignore next */
 if (typeof module !== "undefined") {
   module.exports = {
+    DEMO_CANDIDATES,
     PROCESSING_UPDATES,
     authenticate,
+    buildLocalChatResponse,
+    buildLocalCandidateSearchAnswer,
+    defaultMentionApi,
     createInitialState,
     createRecruiterWorkflow,
     defaultAskAiApi,
@@ -1210,10 +1443,14 @@ if (typeof module !== "undefined") {
     escapeHtml,
     formatDate,
     buildCandidateExplainPayload,
+    getActiveMentionQuery,
     getSkillOptions,
     getVisibleCandidates,
+    localCandidateSearch,
+    localMentionSearch,
     normalizeAiAnswer,
     renderMarkdown,
+    replaceActiveMention,
     statusClass,
     validatePdfFile,
   };
