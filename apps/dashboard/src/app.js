@@ -13,6 +13,151 @@ const PROCESSING_UPDATES = [
   ["Ready", 100, { overall: 89, contact: 95, experience: 84, skills: 91, education: 86, confidence: "High" }],
 ];
 
+const CANDIDATE_ACTIONS = {
+  shortlist: "shortlisted",
+  reject: "rejected",
+};
+
+const DEMO_CANDIDATES = [
+  {
+    id: "cand-001",
+    name: "Ayse Yilmaz",
+    title: "Senior AI Engineer",
+    score: 94,
+    experienceYears: 6.5,
+    appliedAt: "2026-05-05",
+    skills: ["Python", "FastAPI", "NLP", "LLM", "PostgreSQL"],
+    recommendation: "Shortlist",
+    status: "new",
+    factors: [
+      {
+        label: "Python competency",
+        value: "90% match",
+        impact: "positive",
+        detail: "Must-have backend and AI skill is strongly evidenced in recent projects.",
+      },
+      {
+        label: "Experience duration",
+        value: "+1.5 years",
+        impact: "positive",
+        detail: "Experience exceeds the role baseline of 5 years.",
+      },
+      {
+        label: "Project relevance",
+        value: "High",
+        impact: "positive",
+        detail: "Built LLM matching and extraction flows similar to RecruitAI scope.",
+      },
+    ],
+  },
+  {
+    id: "cand-002",
+    name: "Cemocan Demir",
+    title: "Frontend Platform Developer",
+    score: 88,
+    experienceYears: 4.2,
+    appliedAt: "2026-05-04",
+    skills: ["JavaScript", "CSS", "Dashboard UX", "Testing", "API Integration"],
+    recommendation: "Review",
+    status: "new",
+    factors: [
+      {
+        label: "Dashboard delivery",
+        value: "Strong",
+        impact: "positive",
+        detail: "Built recruiter workflow screens with upload, status, and quality monitoring.",
+      },
+      {
+        label: "Testing coverage",
+        value: "98%+ statements",
+        impact: "positive",
+        detail: "Added automated frontend coverage for login and PDF upload workflows.",
+      },
+      {
+        label: "Backend depth",
+        value: "Needs follow-up",
+        impact: "negative",
+        detail: "Backend API ownership is not the primary evidence in the current profile.",
+      },
+    ],
+  },
+  {
+    id: "cand-003",
+    name: "Mehmet Kaya",
+    title: "Full Stack Engineer",
+    score: 79,
+    experienceYears: 5.1,
+    appliedAt: "2026-05-03",
+    skills: ["React", "Node.js", "PostgreSQL", "Docker"],
+    recommendation: "Review",
+    status: "new",
+    factors: [
+      {
+        label: "Full stack coverage",
+        value: "Good",
+        impact: "positive",
+        detail: "Matches API, dashboard, and data persistence expectations.",
+      },
+      {
+        label: "AI specialization",
+        value: "Moderate",
+        impact: "negative",
+        detail: "CV has fewer direct NLP or LLM project signals.",
+      },
+    ],
+  },
+  {
+    id: "cand-004",
+    name: "Elif Arslan",
+    title: "Data Analyst",
+    score: 71,
+    experienceYears: 3.8,
+    appliedAt: "2026-05-01",
+    skills: ["SQL", "Python", "Power BI", "Analytics"],
+    recommendation: "Review",
+    status: "new",
+    factors: [
+      {
+        label: "Data analysis",
+        value: "Strong",
+        impact: "positive",
+        detail: "Good evidence for KPI dashboards and reporting workflows.",
+      },
+      {
+        label: "Product engineering",
+        value: "Gap",
+        impact: "negative",
+        detail: "Less evidence for production frontend or API implementation.",
+      },
+    ],
+  },
+  {
+    id: "cand-005",
+    name: "Burak Sen",
+    title: "Junior Developer",
+    score: 52,
+    experienceYears: 1.4,
+    appliedAt: "2026-04-29",
+    skills: ["JavaScript", "HTML", "CSS"],
+    recommendation: "Reject",
+    status: "new",
+    factors: [
+      {
+        label: "Experience duration",
+        value: "Below baseline",
+        impact: "negative",
+        detail: "Current profile is below the minimum experience level for this role.",
+      },
+      {
+        label: "Skill match",
+        value: "Partial",
+        impact: "negative",
+        detail: "Frontend basics are present but AI/dashboard production evidence is limited.",
+      },
+    ],
+  },
+];
+
 function createInitialState() {
   return {
     session: null,
@@ -20,6 +165,14 @@ function createInitialState() {
     selectedFile: null,
     error: null,
     processing: null,
+    selectedCandidateId: "cand-001",
+    candidateFilters: {
+      skill: "all",
+      sortBy: "score",
+      sortDir: "desc",
+    },
+    actionStatus: {},
+    candidates: DEMO_CANDIDATES.map((candidate) => ({ ...candidate, factors: [...candidate.factors] })),
     history: [
       {
         id: "cv-1842",
@@ -102,9 +255,62 @@ function validatePdfFile(file, maxSizeBytes = 10 * 1024 * 1024) {
   return { valid: true, message: "" };
 }
 
+async function defaultCandidateActionApi(candidateId, action) {
+  const endpoint = `/api/candidates/${encodeURIComponent(candidateId)}/${action}`;
+  const isStaticDemo =
+    typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
+
+  if (isStaticDemo || typeof fetch === "undefined") {
+    return { ok: true, endpoint, demo: true };
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      candidateId,
+      action,
+      source: "recruiter-dashboard",
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Candidate action failed with ${response.status}`);
+  }
+  return { ok: true, endpoint };
+}
+
+function getSkillOptions(candidates) {
+  return Array.from(new Set(candidates.flatMap((candidate) => candidate.skills))).sort((a, b) => a.localeCompare(b));
+}
+
+function getVisibleCandidates(state) {
+  const { skill, sortBy, sortDir } = state.candidateFilters;
+  const direction = sortDir === "asc" ? 1 : -1;
+  const filtered = state.candidates.filter((candidate) => {
+    return skill === "all" || candidate.skills.includes(skill);
+  });
+
+  return filtered.sort((a, b) => {
+    const left = candidateSortValue(a, sortBy);
+    const right = candidateSortValue(b, sortBy);
+    if (left === right) return a.name.localeCompare(b.name);
+    return left > right ? direction : -direction;
+  });
+}
+
+function candidateSortValue(candidate, sortBy) {
+  if (sortBy === "experience") return candidate.experienceYears;
+  if (sortBy === "appliedAt") return new Date(candidate.appliedAt).getTime();
+  return candidate.score;
+}
+
 function createRecruiterWorkflow(options = {}) {
   const root = options.root || (typeof document !== "undefined" ? document.querySelector("#app") : null);
   const authService = options.authService || defaultAuthService;
+  const candidateActionApi = options.candidateActionApi || defaultCandidateActionApi;
   const timerApi = options.timerApi || (typeof window !== "undefined" ? window : globalThis);
   const clock = options.clock || (() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
   const state = options.state || createInitialState();
@@ -170,6 +376,26 @@ function createRecruiterWorkflow(options = {}) {
           }
         });
       }
+
+      const skillFilter = root.querySelector("#skillFilter");
+      if (skillFilter) {
+        skillFilter.addEventListener("change", () => this.updateSkillFilter(skillFilter.value));
+      }
+
+      root.querySelectorAll("[data-sort]").forEach((button) => {
+        button.addEventListener("click", () => this.updateSort(button.dataset.sort));
+      });
+
+      root.querySelectorAll("[data-candidate-id]").forEach((row) => {
+        row.addEventListener("click", () => this.selectCandidate(row.dataset.candidateId));
+      });
+
+      root.querySelectorAll("[data-action]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.handleCandidateAction(button.dataset.candidateId, button.dataset.action);
+        });
+      });
     },
     handleLogin(credentials) {
       const result = authenticate(credentials, authService);
@@ -244,14 +470,68 @@ function createRecruiterWorkflow(options = {}) {
       });
       return true;
     },
+    getVisibleCandidates() {
+      return getVisibleCandidates(state);
+    },
+    getSelectedCandidate() {
+      return state.candidates.find((candidate) => candidate.id === state.selectedCandidateId) || this.getVisibleCandidates()[0];
+    },
+    updateSkillFilter(skill) {
+      state.candidateFilters.skill = skill;
+      const visible = this.getVisibleCandidates();
+      state.selectedCandidateId = visible[0] ? visible[0].id : null;
+      this.render();
+    },
+    updateSort(sortBy) {
+      if (state.candidateFilters.sortBy === sortBy) {
+        state.candidateFilters.sortDir = state.candidateFilters.sortDir === "desc" ? "asc" : "desc";
+      } else {
+        state.candidateFilters.sortBy = sortBy;
+        state.candidateFilters.sortDir = "desc";
+      }
+      const visible = this.getVisibleCandidates();
+      if (visible.length > 0 && !visible.some((candidate) => candidate.id === state.selectedCandidateId)) {
+        state.selectedCandidateId = visible[0].id;
+      }
+      this.render();
+    },
+    selectCandidate(candidateId) {
+      if (!state.candidates.some((candidate) => candidate.id === candidateId)) return false;
+      state.selectedCandidateId = candidateId;
+      this.render();
+      return true;
+    },
+    async handleCandidateAction(candidateId, action) {
+      if (!CANDIDATE_ACTIONS[action]) return false;
+      const candidate = state.candidates.find((item) => item.id === candidateId);
+      if (!candidate) return false;
+
+      state.actionStatus[candidateId] = `${action}:loading`;
+      state.error = null;
+      this.render();
+
+      try {
+        await candidateActionApi(candidateId, action);
+        candidate.status = CANDIDATE_ACTIONS[action];
+        state.actionStatus[candidateId] = `${action}:success`;
+        this.render();
+        return true;
+      } catch (error) {
+        state.actionStatus[candidateId] = `${action}:error`;
+        state.error = error.message || "Candidate action failed.";
+        this.render();
+        return false;
+      }
+    },
     seedDemoFromQuery(search) {
       const params = new URLSearchParams(search || (typeof window !== "undefined" ? window.location.search : ""));
-      if (params.get("demo") !== "ready") return false;
+      if (!["ready", "ranking"].includes(params.get("demo"))) return false;
 
       state.session = {
         email: DEFAULT_CREDENTIALS.email,
         role: DEFAULT_CREDENTIALS.role,
       };
+      state.selectedCandidateId = "cand-002";
       state.processing = {
         id: "cv-demo-ready",
         fileName: "demo-senior-ai-engineer.pdf",
@@ -347,13 +627,16 @@ function dashboardView(state) {
       <section class="content">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Sprint 1 Workflow</p>
-            <h1>CV Intake and Parsing Monitor</h1>
+            <p class="eyebrow">Recruiter Efficiency Engine</p>
+            <h1>Recruiter Dashboard</h1>
+            <span class="topbar-note">CV Intake and Parsing Monitor</span>
           </div>
           <span class="role-pill">Recruiter</span>
         </header>
 
         ${state.error ? `<p class="error-banner" role="alert">${escapeHtml(state.error)}</p>` : ""}
+
+        ${candidateManagementView(state)}
 
         <section class="workflow-grid">
           ${uploadPanel(state)}
@@ -365,6 +648,169 @@ function dashboardView(state) {
       </section>
     </section>
   `;
+}
+
+function candidateManagementView(state) {
+  // Dashboard Logic: Recruiter Efficiency Engine
+  const candidates = getVisibleCandidates(state);
+  const selectedCandidate =
+    state.candidates.find((candidate) => candidate.id === state.selectedCandidateId) || candidates[0];
+  const skillOptions = getSkillOptions(state.candidates);
+  return `
+    <section class="candidate-workspace">
+      <article class="ranking-panel">
+        <div class="section-heading ranking-heading">
+          <div>
+            <p class="eyebrow">AI Candidate Ranking</p>
+            <h2>Candidate Pipeline</h2>
+          </div>
+          <span>${candidates.length} shown</span>
+        </div>
+
+        <div class="toolbar">
+          <label>
+            Skill filter
+            <select id="skillFilter">
+              <option value="all">All skills</option>
+              ${skillOptions
+                .map(
+                  (skill) =>
+                    `<option value="${escapeHtml(skill)}" ${
+                      state.candidateFilters.skill === skill ? "selected" : ""
+                    }>${escapeHtml(skill)}</option>`
+                )
+                .join("")}
+            </select>
+          </label>
+          <div class="sort-controls" aria-label="Sort candidates">
+            ${sortButton("score", "Score", state)}
+            ${sortButton("experience", "Experience", state)}
+            ${sortButton("appliedAt", "Applied", state)}
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="candidate-table">
+            <thead>
+              <tr>
+                <th>Candidate</th>
+                <th>Score</th>
+                <th>Experience</th>
+                <th>Applied</th>
+                <th>Skills</th>
+                <th>Decision</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                candidates.length
+                  ? candidates.map((candidate) => candidateRow(candidate, state)).join("")
+                  : `<tr><td colspan="6" class="empty-state">No candidates match this skill filter.</td></tr>`
+              }
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      ${explainabilityCard(selectedCandidate)}
+    </section>
+  `;
+}
+
+function sortButton(sortBy, label, state) {
+  const active = state.candidateFilters.sortBy === sortBy;
+  const direction = active ? state.candidateFilters.sortDir : "desc";
+  const suffix = active ? (direction === "desc" ? "↓" : "↑") : "";
+  return `<button class="sort-button ${active ? "active" : ""}" type="button" data-sort="${sortBy}">${label} ${suffix}</button>`;
+}
+
+function candidateRow(candidate, state) {
+  const selected = state.selectedCandidateId === candidate.id;
+  const status = state.actionStatus[candidate.id] || candidate.status;
+  const actionBusy = status.includes(":loading");
+  return `
+    <tr class="${selected ? "selected" : ""}" data-candidate-id="${candidate.id}" tabindex="0">
+      <td>
+        <strong>${escapeHtml(candidate.name)}</strong>
+        <span>${escapeHtml(candidate.title)}</span>
+      </td>
+      <td>
+        <div class="score-cell">
+          <strong>${candidate.score}</strong>
+          <span class="score-bar"><span style="width: ${candidate.score}%"></span></span>
+        </div>
+      </td>
+      <td>${candidate.experienceYears.toFixed(1)} yrs</td>
+      <td>${formatDate(candidate.appliedAt)}</td>
+      <td>${candidate.skills.slice(0, 3).map((skill) => `<span class="skill-chip">${escapeHtml(skill)}</span>`).join("")}</td>
+      <td>
+        <div class="decision-actions">
+          ${decisionBadge(candidate.status)}
+          <button class="small-action shortlist" type="button" data-action="shortlist" data-candidate-id="${
+            candidate.id
+          }" ${actionBusy ? "disabled" : ""}>${status === "shortlist:loading" ? "Saving..." : "Shortlist"}</button>
+          <button class="small-action reject" type="button" data-action="reject" data-candidate-id="${
+            candidate.id
+          }" ${actionBusy ? "disabled" : ""}>${status === "reject:loading" ? "Saving..." : "Reject"}</button>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function explainabilityCard(candidate) {
+  if (!candidate) {
+    return `
+      <article class="explain-card">
+        <p class="eyebrow">Explainability</p>
+        <h2>No candidate selected</h2>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="explain-card">
+      <div class="explain-header">
+        <div>
+          <p class="eyebrow">Explainability Card</p>
+          <h2>${escapeHtml(candidate.name)}</h2>
+          <span>${escapeHtml(candidate.title)}</span>
+        </div>
+        <div class="score-ring">${candidate.score}</div>
+      </div>
+
+      <div class="recommendation-line">
+        ${decisionBadge(candidate.status)}
+        <strong>${escapeHtml(candidate.recommendation)}</strong>
+      </div>
+
+      <div class="factor-list">
+        ${candidate.factors
+          .map(
+            (factor) => `
+              <section class="factor-item ${factor.impact}">
+                <div>
+                  <strong>${escapeHtml(factor.label)}</strong>
+                  <span>${escapeHtml(factor.value)}</span>
+                </div>
+                <p>${escapeHtml(factor.detail)}</p>
+              </section>
+            `
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function decisionBadge(status) {
+  const labelMap = {
+    new: "New",
+    shortlisted: "Shortlisted",
+    rejected: "Rejected",
+  };
+  const label = labelMap[status] || "New";
+  return `<span class="decision-badge ${status}">${label}</span>`;
 }
 
 function uploadPanel(state) {
@@ -504,6 +950,10 @@ function statusClass(status) {
   return status.toLowerCase().replace(/\s+/g, "-");
 }
 
+function formatDate(value) {
+  return new Intl.DateTimeFormat("en", { month: "short", day: "2-digit" }).format(new Date(value));
+}
+
 function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -525,7 +975,11 @@ if (typeof module !== "undefined") {
     createInitialState,
     createRecruiterWorkflow,
     defaultAuthService,
+    defaultCandidateActionApi,
     escapeHtml,
+    formatDate,
+    getSkillOptions,
+    getVisibleCandidates,
     statusClass,
     validatePdfFile,
   };

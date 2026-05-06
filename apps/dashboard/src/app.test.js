@@ -2,7 +2,10 @@ const {
   authenticate,
   createRecruiterWorkflow,
   defaultAuthService,
+  defaultCandidateActionApi,
   escapeHtml,
+  getSkillOptions,
+  getVisibleCandidates,
   statusClass,
   validatePdfFile,
 } = require("./app");
@@ -433,5 +436,196 @@ describe("RecruitAI PDF upload workflow", () => {
 
   test("escapes HTML before rendering dynamic text", () => {
     expect(escapeHtml('<img src=x onerror="alert(1)">')).toBe("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+  });
+});
+
+describe("RecruitAI candidate ranking dashboard", () => {
+  test("renders candidates ordered by AI score by default", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    const names = Array.from(controller.root.querySelectorAll(".candidate-table tbody tr td:first-child strong")).map(
+      (node) => node.textContent
+    );
+
+    expect(names[0]).toBe("Ayse Yilmaz");
+    expect(names[names.length - 1]).toBe("Burak Sen");
+  });
+
+  test("skill options are unique and sorted", () => {
+    const controller = makeController();
+
+    const skills = getSkillOptions(controller.state.candidates);
+
+    expect(skills).toContain("Python");
+    expect(skills).toContain("Dashboard UX");
+    expect(skills).toEqual([...skills].sort((a, b) => a.localeCompare(b)));
+  });
+
+  test("filters candidates by selected skill", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.updateSkillFilter("Python");
+
+    expect(controller.getVisibleCandidates().map((candidate) => candidate.name)).toEqual(["Ayse Yilmaz", "Elif Arslan"]);
+    expect(controller.root.querySelector("#skillFilter").value).toBe("Python");
+  });
+
+  test("shows empty state when skill filter has no matches", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+
+    controller.updateSkillFilter("Rust");
+
+    expect(controller.getVisibleCandidates()).toHaveLength(0);
+    expect(controller.root.textContent).toContain("No candidates match this skill filter.");
+  });
+
+  test("sorts candidates by experience through controller method", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+
+    controller.updateSort("experience");
+
+    expect(controller.state.candidateFilters.sortBy).toBe("experience");
+    expect(controller.getVisibleCandidates()[0].name).toBe("Ayse Yilmaz");
+  });
+
+  test("toggles sort direction when same sort is clicked", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+
+    controller.updateSort("score");
+
+    expect(controller.state.candidateFilters.sortDir).toBe("asc");
+    expect(controller.getVisibleCandidates()[0].name).toBe("Burak Sen");
+  });
+
+  test("sort button click updates applied date sorting", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.root.querySelector('[data-sort="appliedAt"]').click();
+
+    expect(controller.state.candidateFilters.sortBy).toBe("appliedAt");
+    expect(controller.root.textContent).toContain("Applied ↓");
+  });
+
+  test("selecting a candidate updates explainability card", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    const selected = controller.selectCandidate("cand-002");
+
+    expect(selected).toBe(true);
+    expect(controller.state.selectedCandidateId).toBe("cand-002");
+    expect(controller.root.textContent).toContain("Cemocan Demir");
+    expect(controller.root.textContent).toContain("Testing coverage");
+  });
+
+  test("clicking a table row selects candidate for explainability", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.root.querySelector('[data-candidate-id="cand-003"]').click();
+
+    expect(controller.state.selectedCandidateId).toBe("cand-003");
+    expect(controller.root.textContent).toContain("Full stack coverage");
+  });
+
+  test("rejects selecting an unknown candidate", () => {
+    const controller = makeController();
+
+    expect(controller.selectCandidate("missing")).toBe(false);
+  });
+
+  test("shortlist action calls API and updates candidate status", async () => {
+    const candidateActionApi = jest.fn(() => Promise.resolve({ ok: true }));
+    const controller = makeController({ candidateActionApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    await controller.handleCandidateAction("cand-002", "shortlist");
+
+    expect(candidateActionApi).toHaveBeenCalledWith("cand-002", "shortlist");
+    expect(controller.state.candidates.find((candidate) => candidate.id === "cand-002").status).toBe("shortlisted");
+    expect(controller.root.textContent).toContain("Shortlisted");
+  });
+
+  test("reject action button calls API and updates candidate status", async () => {
+    const candidateActionApi = jest.fn(() => Promise.resolve({ ok: true }));
+    const controller = makeController({ candidateActionApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.root.querySelector('[data-action="reject"][data-candidate-id="cand-004"]').click();
+    await Promise.resolve();
+
+    expect(candidateActionApi).toHaveBeenCalledWith("cand-004", "reject");
+    expect(controller.state.candidates.find((candidate) => candidate.id === "cand-004").status).toBe("rejected");
+  });
+
+  test("candidate action shows error on API failure", async () => {
+    const candidateActionApi = jest.fn(() => Promise.reject(new Error("API unavailable")));
+    const controller = makeController({ candidateActionApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    const result = await controller.handleCandidateAction("cand-002", "shortlist");
+
+    expect(result).toBe(false);
+    expect(controller.state.actionStatus["cand-002"]).toBe("shortlist:error");
+    expect(controller.root.textContent).toContain("API unavailable");
+  });
+
+  test("candidate action rejects unknown action and unknown candidate", async () => {
+    const controller = makeController();
+
+    await expect(controller.handleCandidateAction("cand-001", "archive")).resolves.toBe(false);
+    await expect(controller.handleCandidateAction("missing", "shortlist")).resolves.toBe(false);
+  });
+
+  test("default candidate action API posts to candidate endpoint", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: true }));
+
+    const result = await defaultCandidateActionApi("cand-001", "shortlist");
+
+    expect(result.endpoint).toBe("/api/candidates/cand-001/shortlist");
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/candidates/cand-001/shortlist",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          candidateId: "cand-001",
+          action: "shortlist",
+          source: "recruiter-dashboard",
+        }),
+      })
+    );
+    global.fetch = originalFetch;
+  });
+
+  test("default candidate action API throws when backend rejects", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 500 }));
+
+    await expect(defaultCandidateActionApi("cand-001", "reject")).rejects.toThrow("Candidate action failed with 500");
+    global.fetch = originalFetch;
+  });
+
+  test("getVisibleCandidates supports applied date sorting", () => {
+    const controller = makeController();
+    controller.state.candidateFilters.sortBy = "appliedAt";
+
+    const candidates = getVisibleCandidates(controller.state);
+
+    expect(candidates[0].name).toBe("Ayse Yilmaz");
   });
 });
