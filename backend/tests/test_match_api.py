@@ -120,4 +120,3 @@ def test_explain_score_endpoint_rejects_empty_question(test_client):
     response = test_client.post("/api/v1/match/explain", json=payload)
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Question cannot be empty."

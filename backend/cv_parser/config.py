@@ -70,6 +70,7 @@ CONFIDENCE_THRESHOLD: float = 0.60
 OCR_TIMEOUT_SECONDS: int = 30          # v2.0: per-page OCR timeout
 PARSE_TIMEOUT_SECONDS: int = 120       # v2.0: overall parse timeout
 BATCH_CONCURRENT_LIMIT: int = 10       # v2.0: max files in a single batch
+PARSER_TELEMETRY_ENABLED: bool = True  # v2.0: Telemetry for performance and OCR fallback tracking
 
 
 @dataclass
@@ -87,6 +88,7 @@ class ParserConfig:
     ocr_timeout_seconds: int = OCR_TIMEOUT_SECONDS
     parse_timeout_seconds: int = PARSE_TIMEOUT_SECONDS
     batch_concurrent_limit: int = BATCH_CONCURRENT_LIMIT
+    telemetry_enabled: bool = PARSER_TELEMETRY_ENABLED
 
 
 # ── Bilingual Error Messages (v2.0) ───────────────────────────────────────
