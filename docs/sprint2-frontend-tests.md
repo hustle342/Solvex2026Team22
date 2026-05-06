@@ -83,11 +83,11 @@ Latest local result:
 | Metric | Result |
 |---|---:|
 | Test suites | 1 passed |
-| Test cases | 38 passed |
-| Statements | 98.57% |
-| Branches | 90.32% |
-| Functions | 97.14% |
-| Lines | 100% |
+| Test cases | 55 passed |
+| Statements | 96.8% |
+| Branches | 89.88% |
+| Functions | 94.44% |
+| Lines | 98.67% |
 
 ## CI/CD
 
@@ -110,7 +110,7 @@ The workflow runs on every push and pull request:
 Add this to the PR:
 
 ```text
-Frontend tests v1 validated with npm test and npm run test:ci. Jest + jsdom runs 38 passing login and PDF upload workflow tests with coverage output in docs/coverage. Current coverage: statements 98.57%, branches 90.32%, functions 97.14%, lines 100%.
+Frontend tests v1 validated with npm test and npm run test:ci. Jest + jsdom runs 55 passing login, PDF upload, candidate ranking, explainability, and action API tests with coverage output in docs/coverage. Current coverage: statements 96.8%, branches 89.88%, functions 94.44%, lines 98.67%.
 ```
 
 ## Blockers
