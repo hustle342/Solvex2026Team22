@@ -79,7 +79,83 @@ Retrieves the status and the resulting JSON data of a specific parse job.
 
 ---
 
-## 4. Confidence Scoring Algorithm
+## 4. Dashboard Ask AI Explainability API
+
+### 4.1. Explain Candidate Score
+`POST /api/v1/match/explain`
+Generates a structured Markdown explanation for the Dashboard Chat Panel and `Explain this score` action.
+
+**Request:**
+- `Content-Type: application/json`
+- `question`: Recruiter question such as `Explain this score` or `Neden?`
+- `candidate`: Current candidate score context from the dashboard
+
+```json
+{
+  "question": "Explain this score",
+  "candidate": {
+    "id": "cand-001",
+    "name": "Ayse Yilmaz",
+    "title": "Senior AI Engineer",
+    "score": 94,
+    "experienceYears": 6.5,
+    "skills": ["Python", "FastAPI", "NLP"],
+    "recommendation": "Shortlist",
+    "factors": [
+      {
+        "label": "Python competency",
+        "value": "90% match",
+        "impact": "positive",
+        "detail": "Strong backend and AI evidence."
+      }
+    ]
+  },
+  "source": "recruiter-dashboard"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "candidate_id": "cand-001",
+  "answer": "### Ayse Yilmaz score explanation\nScore: 94/100...",
+  "highlights": [
+    "Score 94.0/100",
+    "Recommendation: Shortlist",
+    "Skills reviewed: 3"
+  ]
+}
+```
+
+**curl Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/match/explain" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "Neden bu puan?",
+    "candidate": {
+      "id": "cand-001",
+      "name": "Ayse Yilmaz",
+      "score": 94,
+      "experienceYears": 6.5,
+      "skills": ["Python", "FastAPI", "NLP"],
+      "recommendation": "Shortlist",
+      "factors": [
+        {
+          "label": "Python competency",
+          "impact": "positive",
+          "detail": "Strong backend and AI evidence."
+        }
+      ]
+    }
+  }'
+```
+
+**Frontend behavior:** The dashboard sends the selected candidate's score context, shows `AI is thinking...` while the request is in flight, and renders the returned Markdown inside the chat panel.
+
+---
+
+## 5. Confidence Scoring Algorithm
 The parser evaluates the reliability of its output on a `0.0` to `1.0` scale.
 
 **Weights:**
@@ -94,7 +170,7 @@ The parser evaluates the reliability of its output on a `0.0` to `1.0` scale.
 
 ---
 
-## 5. Technical Validation Note
+## 6. Technical Validation Note
 **Coverage:** 91% (60+ unit tests passing)
 **Resilience:** Timeouts applied globally to `_extract_text` and per-page for `_ocr_page`.
 **Performance:** Average clean-PDF parse time < 0.5s.

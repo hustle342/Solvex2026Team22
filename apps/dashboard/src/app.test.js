@@ -1,11 +1,15 @@
 const {
   authenticate,
+  buildCandidateExplainPayload,
   createRecruiterWorkflow,
+  defaultAskAiApi,
   defaultAuthService,
   defaultCandidateActionApi,
   escapeHtml,
   getSkillOptions,
   getVisibleCandidates,
+  normalizeAiAnswer,
+  renderMarkdown,
   statusClass,
   validatePdfFile,
 } = require("./app");
@@ -627,5 +631,165 @@ describe("RecruitAI candidate ranking dashboard", () => {
     const candidates = getVisibleCandidates(controller.state);
 
     expect(candidates[0].name).toBe("Ayse Yilmaz");
+  });
+});
+
+describe("RecruitAI Ask AI explainability chat", () => {
+  test("renders chat panel with manual input and explain score button", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+
+    controller.render();
+
+    expect(controller.root.textContent).toContain("Ask AI");
+    expect(controller.root.querySelector("#aiChatInput").placeholder).toContain("Neden?");
+    expect(controller.root.querySelector('[data-question="Explain this score"]')).not.toBeNull();
+  });
+
+  test("Ask AI sends candidate score context and removes loading state after response", async () => {
+    let resolveRequest;
+    const askAiApi = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveRequest = resolve;
+        })
+    );
+    const controller = makeController({ askAiApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    const pending = controller.askAI("Neden bu puan?", "cand-002");
+
+    expect(controller.state.chat.isLoading).toBe(true);
+    expect(controller.root.textContent).toContain("AI is thinking...");
+    expect(askAiApi).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: "Neden bu puan?",
+        source: "recruiter-dashboard",
+        candidate: expect.objectContaining({
+          id: "cand-002",
+          score: 88,
+          factors: expect.any(Array),
+        }),
+      })
+    );
+
+    resolveRequest({
+      answer: "### Cemocan score explanation\n- Strong frontend evidence\n- Review backend depth",
+    });
+    await pending;
+
+    expect(controller.state.chat.isLoading).toBe(false);
+    expect(controller.root.textContent).not.toContain("AI is thinking...");
+    expect(controller.root.textContent).toContain("Cemocan score explanation");
+    expect(controller.root.textContent).toContain("Strong frontend evidence");
+  });
+
+  test("Explain this score button opens chat for the selected candidate", async () => {
+    const askAiApi = jest.fn(() => Promise.resolve({ answer: "### Explained\n- Score is driven by skill fit." }));
+    const controller = makeController({ askAiApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.root.querySelector('[data-question="Explain this score"]').click();
+    await Promise.resolve();
+
+    expect(askAiApi).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: "Explain this score",
+        candidate: expect.objectContaining({ id: "cand-001" }),
+      })
+    );
+    expect(controller.root.textContent).toContain("Score is driven by skill fit.");
+  });
+
+  test("manual chat submit sends typed question", async () => {
+    const askAiApi = jest.fn(() => Promise.resolve({ answer: "### Manual answer\n- Because score factors are strong." }));
+    const controller = makeController({ askAiApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.root.querySelector("#aiChatInput").value = "Neden?";
+    controller.root.querySelector("#aiChatForm").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+
+    expect(askAiApi).toHaveBeenCalledWith(expect.objectContaining({ question: "Neden?" }));
+    expect(controller.root.textContent).toContain("Manual answer");
+  });
+
+  test("chat shows service errors as assistant messages", async () => {
+    const askAiApi = jest.fn(() => Promise.reject(new Error("AI timeout")));
+    const controller = makeController({ askAiApi });
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    const result = await controller.askAI("Explain this score", "cand-001");
+
+    expect(result).toBe(false);
+    expect(controller.state.chat.isLoading).toBe(false);
+    expect(controller.root.textContent).toContain("Unable to explain score");
+    expect(controller.root.textContent).toContain("AI timeout");
+  });
+
+  test("chat toggle collapses and reopens panel", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    controller.root.querySelector("#chatToggle").click();
+
+    expect(controller.state.chat.isOpen).toBe(false);
+    expect(controller.root.querySelector("#aiChatInput")).toBeNull();
+  });
+
+  test("default Ask AI API posts to explain endpoint", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ answer: "### API answer" }),
+      })
+    );
+
+    const response = await defaultAskAiApi({
+      question: "Explain this score",
+      candidate: buildCandidateExplainPayload(createRecruiterWorkflow().state.candidates[0]),
+      source: "recruiter-dashboard",
+    });
+
+    expect(response.answer).toBe("### API answer");
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/v1/match/explain",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("Explain this score"),
+      })
+    );
+    global.fetch = originalFetch;
+  });
+
+  test("default Ask AI API throws when backend rejects", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 500 }));
+
+    await expect(
+      defaultAskAiApi({
+        question: "Explain this score",
+        candidate: buildCandidateExplainPayload(createRecruiterWorkflow().state.candidates[0]),
+      })
+    ).rejects.toThrow("Ask AI failed with 500");
+    global.fetch = originalFetch;
+  });
+
+  test("markdown renderer escapes unsafe content and renders bullets", () => {
+    const html = renderMarkdown("### Title\n- <script>alert(1)</script>");
+
+    expect(html).toContain("<h3>Title</h3>");
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(html).not.toContain("<script>");
+  });
+
+  test("normalizes empty AI responses", () => {
+    expect(normalizeAiAnswer({})).toContain("empty explanation");
   });
 });
