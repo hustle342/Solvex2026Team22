@@ -1,4 +1,4 @@
-# Optimized by Skills Agent for RecruitAI
+﻿# Optimized by Skills Agent for RecruitAI
 # Precision@K Metric Calculation
 
 from typing import List
@@ -6,11 +6,11 @@ from typing import List
 def calculate_precision_at_k(ranked_results: List[dict], k: int = 10, relevance_threshold: float = 70.0) -> float:
     """
     Calculates Precision@K for a ranked list of match results.
-    
+
     A candidate is considered 'relevant' if their final_score >= relevance_threshold.
-    
+
     Precision@K = (Number of relevant candidates in top K) / K
-    
+
     :param ranked_results: A list of dicts or MatchResult objects, assumed sorted by score descending.
     :param k: The cutoff rank K.
     :param relevance_threshold: The score threshold to consider a match "relevant".

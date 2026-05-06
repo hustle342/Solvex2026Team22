@@ -1,4 +1,4 @@
-# Optimized by Skills Agent for RecruitAI
+﻿# Optimized by Skills Agent for RecruitAI
 # Core Matching Engine Logic
 
 from typing import List
@@ -8,7 +8,7 @@ class Matcher:
     """
     Evaluates candidates against Job Descriptions using hard filters and weighted scoring.
     """
-    
+
     def __init__(self, weight_required_skills: float = 0.6, weight_nice_to_have: float = 0.2, weight_experience: float = 0.2):
         self.weight_req_skills = weight_required_skills
         self.weight_nice = weight_nice_to_have
@@ -40,8 +40,8 @@ class Matcher:
         if candidate.total_experience_years < jd.min_experience_years:
             is_eligible = False
             rejection_reason = f"Candidate experience ({candidate.total_experience_years}y) is below required minimum ({jd.min_experience_years}y)."
-        
-        # Hard filter on required skills: we can require 100% or a threshold. 
+
+        # Hard filter on required skills: we can require 100% or a threshold.
         # For strict matching, if missing_req > 0, they fail the hard filter.
         elif len(missing_req) > 0:
             is_eligible = False
@@ -68,7 +68,7 @@ class Matcher:
 
         # Experience score (Cap at 100% for the allocated weight if they meet or exceed)
         # Give bonus if they have more, up to max allowed by weight
-        exp_ratio = min(candidate.total_experience_years / (jd.min_experience_years or 1.0), 1.5) 
+        exp_ratio = min(candidate.total_experience_years / (jd.min_experience_years or 1.0), 1.5)
         # If min is 0, they get full points if they have any exp. If both 0, ratio 1.0
         if jd.min_experience_years == 0 and candidate.total_experience_years == 0:
             exp_ratio = 1.0

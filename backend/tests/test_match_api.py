@@ -36,16 +36,16 @@ def test_match_endpoint_success(test_client):
 
     response = test_client.post("/api/v1/match", json=payload)
     assert response.status_code == 200
-    
+
     data = response.json()
     assert data["total_candidates"] == 2
     assert len(data["results"]) == 2
-    
+
     # Results should be ranked: Eligible Candidate should be first
     assert data["results"][0]["candidate_id"] == "c-1"
     assert data["results"][0]["final_score"] > 0
     assert data["results"][0]["explanation"]["is_eligible"] is True
-    
+
     assert data["results"][1]["candidate_id"] == "c-2"
     assert data["results"][1]["final_score"] == 0.0
     assert data["results"][1]["explanation"]["is_eligible"] is False
@@ -59,7 +59,7 @@ def test_match_endpoint_empty_candidates(test_client):
         },
         "candidates": []
     }
-    
+
     response = test_client.post("/api/v1/match", json=payload)
     assert response.status_code == 400
-    assert "Aday listesi boş olamaz" in response.json()["detail"]
+    assert "Aday listesi boÅŸ olamaz" in response.json()["detail"]

@@ -1,4 +1,4 @@
-# Optimized by Skills Agent for RecruitAI
+﻿# Optimized by Skills Agent for RecruitAI
 # Matching Engine Data Schemas
 from typing import List, Optional
 from pydantic import BaseModel, Field
@@ -20,7 +20,7 @@ class Candidate(BaseModel):
     skills: List[str] = Field(default_factory=list)
     total_experience_years: float = 0.0
     location: Optional[str] = None
-    
+
 class ExplainabilityFactor(BaseModel):
     """Explains why a candidate received a certain score."""
     is_eligible: bool
