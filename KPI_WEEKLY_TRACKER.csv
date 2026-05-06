@@ -1,0 +1,11 @@
+week_id,sprint_id,kpi_name,baseline_value,current_value,target_value,unit,status_rag,data_source,owner,notes
+2026-W19,Sprint-0,Manual Screening Effort Reduction,11,NA,50,percent,Amber,Time study logs,Serdar,Baseline set from 9 samples; overall median manual screening time is 11 min
+2026-W19,Sprint-0,CV Parse Critical Field Accuracy,NA,NA,90,percent,Amber,Eval dataset,Samet,Need first parser benchmark run
+2026-W19,Sprint-0,Precision@10,NA,NA,0.75,ratio,Amber,Ranked eval set,Samet,Need first ranking benchmark run
+2026-W19,Sprint-0,Median Time-to-Shortlist,NA,NA,5,minutes,Amber,System event logs,Cemilcan,Start event logging before first run
+2026-W19,Sprint-0,Recruiter Acceptance Rate,NA,NA,60,percent,Amber,Dashboard decision actions,Cemilcan,Requires AI suggestion review events
+2026-W20,Sprint-2,Manual Screening Effort Reduction,11,NA,50,percent,Amber,Time study logs,Serdar,Sprint 2 checkpoint pending after first shortlist flow
+2026-W20,Sprint-2,CV Parse Critical Field Accuracy,NA,NA,90,percent,Amber,Eval dataset,Samet,Carry-over metric from Sprint 1 parser output quality
+2026-W20,Sprint-2,Precision@10,NA,0.00,0.75,ratio,Amber,Ranked eval set,Samet,Baseline measurement initiated for Matching Engine v1
+2026-W20,Sprint-2,Median Time-to-Shortlist,NA,NA,5,minutes,Amber,System event logs,Cemilcan,Instrumentation alignment in progress for shortlist latency
+2026-W20,Sprint-2,Recruiter Acceptance Rate,NA,NA,60,percent,Amber,Dashboard decision actions,Cemilcan,Depends on shortlist/reject action integration
