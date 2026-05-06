@@ -256,7 +256,7 @@ function validatePdfFile(file, maxSizeBytes = 10 * 1024 * 1024) {
 }
 
 async function defaultCandidateActionApi(candidateId, action) {
-  const endpoint = `/api/candidates/${encodeURIComponent(candidateId)}/${action}`;
+  const endpoint = `/api/v1/candidates/${encodeURIComponent(candidateId)}/${action}`;
   const isStaticDemo =
     typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
 
