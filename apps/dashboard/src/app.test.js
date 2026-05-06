@@ -8,6 +8,7 @@ const {
   defaultCandidateActionApi,
   defaultMentionApi,
   escapeHtml,
+  getConfiguredApiBase,
   getActiveMentionQuery,
   getSkillOptions,
   getVisibleCandidates,
@@ -16,6 +17,7 @@ const {
   normalizeAiAnswer,
   renderMarkdown,
   replaceActiveMention,
+  resolveApiUrl,
   statusClass,
   validatePdfFile,
 } = require("./app");
@@ -607,9 +609,9 @@ describe("RecruitAI candidate ranking dashboard", () => {
 
     const result = await defaultCandidateActionApi("cand-001", "shortlist");
 
-    expect(result.endpoint).toBe("/api/candidates/cand-001/shortlist");
+    expect(result.endpoint).toBe("/api/v1/candidates/cand-001/shortlist");
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/candidates/cand-001/shortlist",
+      "/api/v1/candidates/cand-001/shortlist",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -637,6 +639,28 @@ describe("RecruitAI candidate ranking dashboard", () => {
     const candidates = getVisibleCandidates(controller.state);
 
     expect(candidates[0].name).toBe("Ayse Yilmaz");
+  });
+
+  test("sidebar section buttons show detail and activate workflow panels", () => {
+    const controller = makeController();
+    controller.state.session = { email: "recruiter@recruitai.local", role: "recruiter" };
+    controller.render();
+
+    expect(controller.root.querySelector('[data-dashboard-section="processing"]').textContent).toContain("Ready - 100%");
+    expect(controller.root.querySelector('[data-dashboard-section="quality"]').textContent).toContain("High confidence");
+
+    controller.root.querySelector('[data-dashboard-section="quality"]').click();
+
+    expect(controller.state.dashboardSection).toBe("quality");
+    expect(controller.root.querySelector('[data-dashboard-section="quality"]').classList.contains("active")).toBe(true);
+    expect(controller.root.querySelector('[data-workflow-section="quality"]').classList.contains("section-active")).toBe(true);
+  });
+
+  test("sidebar section navigation rejects unknown sections", () => {
+    const controller = makeController();
+
+    expect(controller.showDashboardSection("missing")).toBe(false);
+    expect(controller.state.dashboardSection).toBe("upload");
   });
 });
 
@@ -822,6 +846,15 @@ describe("RecruitAI Ask AI explainability chat", () => {
     global.fetch = originalFetch;
   });
 
+  test("API URL resolver supports configured backend origin", () => {
+    window.RECRUITAI_API_BASE = "http://127.0.0.1:8000/";
+
+    expect(getConfiguredApiBase()).toBe("http://127.0.0.1:8000");
+    expect(resolveApiUrl("/api/v1/chat/query")).toBe("http://127.0.0.1:8000/api/v1/chat/query");
+
+    delete window.RECRUITAI_API_BASE;
+  });
+
   test("default Ask AI API throws when backend rejects", async () => {
     const originalFetch = global.fetch;
     global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 500 }));
@@ -853,7 +886,7 @@ describe("RecruitAI Ask AI explainability chat", () => {
 
   test("local mention and search helpers rank demo candidates", () => {
     expect(localMentionSearch("cem")[0].label).toBe("Cemocan Demir");
-    expect(localCandidateSearch("Python FastAPI NLP 5+ yil")[0].name).toBe("Ayse Yilmaz");
+    expect(localCandidateSearch("Python FastAPI NLP 5+ yıl")[0].name).toBe("Ayse Yilmaz");
     expect(buildLocalChatResponse({ message: "@cem", mentions: ["cand-002"] }).sources[0]).toContain("cand-002");
   });
 

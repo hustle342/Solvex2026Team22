@@ -13,8 +13,14 @@ from backend.knowledge.llm_client import (
     build_llm_prompt,
     recruitai_system_prompt,
 )
-from backend.knowledge.markdown_exporter import DEFAULT_CANDIDATE_MARKDOWN_DIR, write_candidate_markdown
+from backend.knowledge.markdown_exporter import (
+    DEFAULT_CANDIDATE_MARKDOWN_DIR,
+    candidate_markdown_filename,
+    candidate_to_markdown,
+    write_candidate_markdown,
+)
 from backend.knowledge.retriever import (
+    CandidateDocument,
     MarkdownCandidateRetriever,
     build_mentioned_answer,
     build_search_answer,
@@ -38,6 +44,7 @@ class CandidateMarkdownResponse(BaseModel):
 class ChatQueryRequest(BaseModel):
     message: str
     mentions: list[str] = Field(default_factory=list)
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ChatQueryResponse(BaseModel):
@@ -77,7 +84,10 @@ async def query_chat(request: ChatQueryRequest) -> ChatQueryResponse:
 
     retriever = get_retriever()
     if request.mentions:
-        documents = retriever.get_by_ids(request.mentions)
+        documents = _merge_documents(
+            retriever.get_by_ids(request.mentions),
+            _candidate_documents_from_payload(request.candidates, request.mentions),
+        )
         deterministic_answer = build_mentioned_answer(message, documents)
         sources = [document.path for document in documents]
         candidates = [
@@ -101,8 +111,13 @@ async def query_chat(request: ChatQueryRequest) -> ChatQueryResponse:
         return ChatQueryResponse(answer=answer, sources=sources, candidates=candidates, mode=mode, warning=warning)
 
     candidates = retriever.search_natural_language(message)
+    if not candidates and request.candidates:
+        candidates = _search_payload_candidates(message, request.candidates)
     deterministic_answer = build_search_answer(message, candidates)
-    documents = retriever.get_by_ids([str(candidate["id"]) for candidate in candidates])
+    documents = _merge_documents(
+        retriever.get_by_ids([str(candidate["id"]) for candidate in candidates]),
+        _candidate_documents_from_payload(request.candidates, [str(candidate["id"]) for candidate in candidates]),
+    )
     answer, mode, warning = await _maybe_generate_llm_answer(
         message=message,
         context_markdown="\n\n---\n\n".join(document.markdown for document in documents),
@@ -119,6 +134,122 @@ async def query_chat(request: ChatQueryRequest) -> ChatQueryResponse:
 
 def _display_path(path: Path) -> str:
     return path.as_posix()
+
+
+def _merge_documents(*groups: list[CandidateDocument]) -> list[CandidateDocument]:
+    documents: list[CandidateDocument] = []
+    seen: set[str] = set()
+    for group in groups:
+        for document in group:
+            key = document.id.lower()
+            if key in seen:
+                continue
+            documents.append(document)
+            seen.add(key)
+    return documents
+
+
+def _candidate_documents_from_payload(
+    candidates: list[dict[str, Any]], candidate_ids: list[str] | None = None
+) -> list[CandidateDocument]:
+    wanted = {candidate_id.lower() for candidate_id in candidate_ids or [] if candidate_id}
+    documents: list[CandidateDocument] = []
+    for candidate in candidates:
+        candidate_id = str(candidate.get("id") or candidate.get("candidateId") or "").strip()
+        if not candidate_id:
+            continue
+        if wanted and candidate_id.lower() not in wanted:
+            continue
+        markdown = candidate_to_markdown(candidate)
+        path = MARKDOWN_DIR / candidate_markdown_filename(candidate)
+        documents.append(
+            CandidateDocument(
+                id=candidate_id,
+                label=str(candidate.get("name") or candidate.get("label") or "Not provided"),
+                type="candidate",
+                path=_display_path(path),
+                markdown=markdown,
+                score=_safe_float(candidate.get("score") or candidate.get("candidateScore")),
+                skills=[str(skill) for skill in candidate.get("skills", []) if skill],
+                experience_years=_safe_float(candidate.get("experienceYears") or candidate.get("experience_years")),
+                recommendation=str(candidate.get("recommendation") or "Not provided"),
+            )
+        )
+    return documents
+
+
+def _search_payload_candidates(message: str, payload_candidates: list[dict[str, Any]], limit: int = 5) -> list[dict[str, Any]]:
+    tokens = _query_tokens(message)
+    min_years = _extract_min_years(message)
+    results: list[dict[str, Any]] = []
+    for candidate in payload_candidates:
+        candidate_id = str(candidate.get("id") or candidate.get("candidateId") or "").strip()
+        if not candidate_id:
+            continue
+        skills = [str(skill) for skill in candidate.get("skills", []) if skill]
+        candidate_score = _safe_float(candidate.get("score") or candidate.get("candidateScore"))
+        experience_years = _safe_float(candidate.get("experienceYears") or candidate.get("experience_years"))
+        label = str(candidate.get("name") or candidate.get("label") or candidate_id)
+        haystack = _normalize(
+            " ".join(
+                [
+                    label,
+                    str(candidate.get("title") or ""),
+                    " ".join(skills),
+                    str(candidate.get("recommendation") or ""),
+                ]
+            )
+        )
+        matched_skills = [skill for skill in skills if _normalize(skill) in tokens]
+        token_hits = sum(1 for token in tokens if token in haystack)
+        score = token_hits * 12 + len(matched_skills) * 18 + candidate_score / 10
+        if min_years is not None:
+            score += 20 if experience_years >= min_years else -25
+        if score <= 0:
+            continue
+        path = _display_path(MARKDOWN_DIR / candidate_markdown_filename(candidate))
+        results.append(
+            {
+                "id": candidate_id,
+                "label": label,
+                "type": "candidate",
+                "path": path,
+                "score": round(score, 2),
+                "candidateScore": candidate_score,
+                "experienceYears": experience_years,
+                "skills": skills,
+                "matchedSkills": matched_skills,
+                "recommendation": str(candidate.get("recommendation") or "Not provided"),
+            }
+        )
+    return sorted(results, key=lambda item: (-float(item["score"]), -float(item["candidateScore"]), str(item["label"])))[:limit]
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _extract_min_years(message: str) -> float | None:
+    import re
+
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*\+?\s*(?:years?|yrs?|yil|yıl)", _normalize(message))
+    return float(match.group(1).replace(",", ".")) if match else None
+
+
+def _query_tokens(message: str) -> set[str]:
+    import re
+
+    stopwords = {"bana", "bilen", "bir", "ve", "lazim", "lazım", "deneyimli", "yil", "yıl", "years"}
+    tokens = set(re.findall(r"[a-z0-9][a-z0-9.+#-]*", _normalize(message)))
+    return {token for token in tokens if len(token) > 1 and token not in stopwords and not token.isdigit()}
+
+
+def _normalize(value: Any) -> str:
+    replacements = str.maketrans({"ı": "i", "ğ": "g", "ü": "u", "ş": "s", "ö": "o", "ç": "c"})
+    return str(value or "").lower().translate(replacements)
 
 
 async def _maybe_generate_llm_answer(

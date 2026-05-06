@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RecruitAI CV Paneli</title>
+    <link rel="stylesheet" href="sidebar.css">
+  </head>
+  <body>
+    <main class="panel">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">RecruitAI</p>
+          <h1>Gmail CV Analizi</h1>
+        </div>
+        <span id="connectionStatus" class="status status-idle">Hazir</span>
+      </header>
+
+      <section class="settings" aria-label="Backend ayarlari">
+        <label for="backendUrl">Backend URL</label>
+        <div class="settings-row">
+          <input id="backendUrl" type="url" autocomplete="off" spellcheck="false">
+          <button id="saveSettings" type="button">Kaydet</button>
+        </div>
+        <label class="toggle">
+          <input id="autoAnalyze" type="checkbox">
+          <span>PDF bulununca otomatik analiz et</span>
+        </label>
+        <button id="openDashboard" class="dashboard-link" type="button">Uygulamaya git</button>
+      </section>
+
+      <section class="summary-grid" aria-label="Ozet">
+        <article>
+          <strong id="detectedCount">0</strong>
+          <span>Tespit</span>
+        </article>
+        <article>
+          <strong id="resultCount">0</strong>
+          <span>Analiz</span>
+        </article>
+        <article>
+          <strong id="errorCount">0</strong>
+          <span>Hata</span>
+        </article>
+      </section>
+
+      <nav class="tabs" aria-label="Panel sekmeleri">
+        <button class="tab active" type="button" data-tab="results">Sonuclar</button>
+        <button class="tab" type="button" data-tab="detected">PDF'ler</button>
+        <button class="tab" type="button" data-tab="chat">Asistan</button>
+      </nav>
+
+      <section id="resultsView" class="view active" aria-live="polite">
+        <div id="processingList" class="stack"></div>
+        <div id="resultsList" class="stack"></div>
+        <p id="emptyResults" class="empty">Gmail'de PDF CV eki olan bir e-posta acildiginda analiz burada gorunur.</p>
+      </section>
+
+      <section id="detectedView" class="view" aria-live="polite">
+        <div id="detectedList" class="stack"></div>
+        <div id="errorsList" class="stack"></div>
+      </section>
+
+      <section id="chatView" class="view">
+        <div id="chatMessages" class="chat-log"></div>
+        <form id="chatForm" class="chat-form">
+          <input id="chatInput" type="text" autocomplete="off" placeholder="Son analiz hakkinda sor...">
+          <button type="submit">Sor</button>
+        </form>
+      </section>
+    </main>
+    <script src="sidebar.js"></script>
+  </body>
+</html>

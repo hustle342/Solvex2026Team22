@@ -138,6 +138,55 @@ def test_chat_query_natural_language_ranks_matching_candidates(workspace_tmp_pat
     assert "Candidate recommendations" in data["answer"]
 
 
+def test_chat_query_uses_dashboard_candidate_payload_when_markdown_is_empty(workspace_tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_api, "MARKDOWN_DIR", workspace_tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/chat/query",
+        json={
+            "message": "@cemocan bu skor neden iyi?",
+            "mentions": ["cand-002"],
+            "candidates": [_candidate(id="cand-002", name="Cemocan Demir", score=88)],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "### Cemocan Demir" in data["answer"]
+    assert data["candidates"][0]["id"] == "cand-002"
+    assert data["sources"][0].endswith("cand-002-cemocan-demir.md")
+
+
+def test_chat_query_searches_dashboard_candidate_payload_when_markdown_is_empty(workspace_tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_api, "MARKDOWN_DIR", workspace_tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/chat/query",
+        json={
+            "message": "Bana Python, FastAPI ve NLP bilen 5+ yıl deneyimli biri lazım",
+            "mentions": [],
+            "candidates": [
+                _candidate(id="cand-001", name="Ayse Yilmaz", score=94, experienceYears=6.5),
+                _candidate(
+                    id="cand-003",
+                    name="Mehmet Kaya",
+                    title="Full Stack Engineer",
+                    score=79,
+                    experienceYears=5.1,
+                    skills=["React", "Node.js", "PostgreSQL", "Docker"],
+                ),
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["candidates"][0]["id"] == "cand-001"
+    assert data["candidates"][0]["matchedSkills"] == ["Python", "FastAPI", "NLP"]
+
+
 def test_chat_query_uses_groq_when_api_key_is_configured(workspace_tmp_path, monkeypatch):
     monkeypatch.setattr(chat_api, "MARKDOWN_DIR", workspace_tmp_path)
     write_candidate_markdown(_candidate(id="cand-002", name="Cemocan Demir", score=88), workspace_tmp_path)

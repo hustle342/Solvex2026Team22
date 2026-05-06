@@ -121,3 +121,36 @@ def test_explain_score_endpoint_rejects_empty_question(test_client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Question cannot be empty."
+
+
+def test_candidate_shortlist_endpoint_updates_decision(test_client):
+    response = test_client.post(
+        "/api/v1/candidates/cand-001/shortlist",
+        json={"candidateId": "cand-001", "action": "shortlist", "source": "recruiter-dashboard"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["candidateId"] == "cand-001"
+    assert data["status"] == "shortlisted"
+
+
+def test_candidate_reject_endpoint_updates_decision(test_client):
+    response = test_client.post(
+        "/api/v1/candidates/cand-002/reject",
+        json={"candidateId": "cand-002", "action": "reject", "source": "recruiter-dashboard"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+
+
+def test_candidate_action_endpoint_rejects_mismatched_body(test_client):
+    response = test_client.post(
+        "/api/v1/candidates/cand-001/shortlist",
+        json={"candidateId": "cand-002", "action": "shortlist", "source": "recruiter-dashboard"},
+    )
+
+    assert response.status_code == 400
+    assert "must match" in response.json()["detail"]

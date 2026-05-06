@@ -15,14 +15,18 @@ STOPWORDS = {
     "deneyimli",
     "gerekiyor",
     "ihtiyac",
+    "ihtiyacım",
     "ihtiyacim",
+    "lazım",
     "lazim",
     "olan",
     "ve",
     "with",
     "year",
     "years",
+    "yıl",
     "yil",
+    "yıllık",
     "yillik",
 }
 

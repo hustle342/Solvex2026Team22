@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     PARSER_PARSE_TIMEOUT: int = 120        # v2.0: overall parse timeout (seconds)
     BATCH_CONCURRENT_LIMIT: int = 10       # v2.0: max files in a batch upload
 
+    # Chrome extension CV analysis
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    EXTENSION_DB_PATH: str = str(Path("storage/candidates.sqlite3").resolve())
+
     @property
     def max_upload_bytes(self) -> int:
         return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024

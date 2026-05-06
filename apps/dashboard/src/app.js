@@ -18,6 +18,8 @@ const CANDIDATE_ACTIONS = {
   reject: "rejected",
 };
 
+const DEFAULT_BACKEND_ORIGIN = "http://127.0.0.1:8000";
+
 const DEMO_CANDIDATES = [
   {
     id: "cand-001",
@@ -162,6 +164,7 @@ function createInitialState() {
   return {
     session: null,
     activeView: "login",
+    dashboardSection: "upload",
     selectedFile: null,
     error: null,
     processing: null,
@@ -270,7 +273,7 @@ function validatePdfFile(file, maxSizeBytes = 10 * 1024 * 1024) {
 }
 
 async function defaultCandidateActionApi(candidateId, action) {
-  const endpoint = `/api/candidates/${encodeURIComponent(candidateId)}/${action}`;
+  const endpoint = resolveApiUrl(`/api/v1/candidates/${encodeURIComponent(candidateId)}/${action}`);
   const isStaticDemo =
     typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
 
@@ -297,7 +300,7 @@ async function defaultCandidateActionApi(candidateId, action) {
 }
 
 async function defaultAskAiApi(payload) {
-  const endpoint = "/api/v1/chat/query";
+  const endpoint = resolveApiUrl("/api/v1/chat/query");
   const isStaticDemo =
     typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
 
@@ -320,7 +323,7 @@ async function defaultAskAiApi(payload) {
 }
 
 async function defaultMentionApi(query, candidates = DEMO_CANDIDATES) {
-  const endpoint = `/api/v1/knowledge/mentions?q=${encodeURIComponent(query || "")}`;
+  const endpoint = resolveApiUrl(`/api/v1/knowledge/mentions?q=${encodeURIComponent(query || "")}`);
   const isStaticDemo =
     typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
 
@@ -473,6 +476,29 @@ function candidateSortValue(candidate, sortBy) {
   return candidate.score;
 }
 
+function resolveApiUrl(path) {
+  const apiBase = getConfiguredApiBase();
+  return apiBase ? `${apiBase}${path}` : path;
+}
+
+function getConfiguredApiBase() {
+  if (typeof window === "undefined" || !window.location) return "";
+  if (typeof window.RECRUITAI_API_BASE === "string" && window.RECRUITAI_API_BASE.trim()) {
+    return window.RECRUITAI_API_BASE.trim().replace(/\/+$/, "");
+  }
+
+  const location = window.location;
+  if (location.protocol === "file:" || location.protocol === "") return "";
+
+  const params = new URLSearchParams(location.search || "");
+  const queryApiBase = params.get("apiBase");
+  if (queryApiBase) return queryApiBase.replace(/\/+$/, "");
+
+  const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+  const isLocalStaticServer = localHosts.has(location.hostname) && location.port && location.port !== "8000";
+  return isLocalStaticServer ? DEFAULT_BACKEND_ORIGIN : "";
+}
+
 function createRecruiterWorkflow(options = {}) {
   const root = options.root || (typeof document !== "undefined" ? document.querySelector("#app") : null);
   const authService = options.authService || defaultAuthService;
@@ -552,6 +578,10 @@ function createRecruiterWorkflow(options = {}) {
 
       root.querySelectorAll("[data-sort]").forEach((button) => {
         button.addEventListener("click", () => this.updateSort(button.dataset.sort));
+      });
+
+      root.querySelectorAll("[data-dashboard-section]").forEach((button) => {
+        button.addEventListener("click", () => this.showDashboardSection(button.dataset.dashboardSection));
       });
 
       root.querySelectorAll("[data-candidate-id]").forEach((row) => {
@@ -704,6 +734,17 @@ function createRecruiterWorkflow(options = {}) {
     toggleChat() {
       state.chat.isOpen = !state.chat.isOpen;
       this.render();
+    },
+    showDashboardSection(section) {
+      const allowed = new Set(["upload", "processing", "quality"]);
+      if (!allowed.has(section)) return false;
+      state.dashboardSection = section;
+      this.render();
+      const target = root.querySelector(`[data-workflow-section="${section}"]`);
+      if (target && typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return true;
     },
     async updateChatInput(value) {
       state.chat.input = value;
@@ -890,9 +931,9 @@ function dashboardView(state) {
           </div>
         </div>
         <nav class="nav-list" aria-label="Dashboard sections">
-          <button class="nav-item active" type="button">Upload Flow</button>
-          <button class="nav-item" type="button">Processing</button>
-          <button class="nav-item" type="button">Quality</button>
+          ${dashboardNavItem("upload", "Upload Flow", uploadNavDetail(state), state)}
+          ${dashboardNavItem("processing", "Processing", processingNavDetail(active), state)}
+          ${dashboardNavItem("quality", "Quality", qualityNavDetail(active), state)}
         </nav>
         <div class="user-card">
           <span>${escapeHtml(state.session.email)}</span>
@@ -917,8 +958,8 @@ function dashboardView(state) {
 
         <section class="workflow-grid">
           ${uploadPanel(state)}
-          ${statusPanel(active)}
-          ${qualityPanel(active)}
+          ${statusPanel(active, state)}
+          ${qualityPanel(active, state)}
         </section>
 
         ${historyPanel(state)}
@@ -926,6 +967,28 @@ function dashboardView(state) {
       </section>
     </section>
   `;
+}
+
+function dashboardNavItem(section, label, detail, state) {
+  const active = state.dashboardSection === section;
+  return `
+    <button class="nav-item ${active ? "active" : ""}" type="button" data-dashboard-section="${section}" aria-pressed="${active}">
+      <strong>${escapeHtml(label)}</strong>
+      <span>${escapeHtml(detail)}</span>
+    </button>
+  `;
+}
+
+function uploadNavDetail(state) {
+  return state.selectedFile ? state.selectedFile.name : `${state.history.length} recent CV jobs`;
+}
+
+function processingNavDetail(item) {
+  return `${item.status} - ${item.progress || 0}%`;
+}
+
+function qualityNavDetail(item) {
+  return `${item.parseQuality.confidence} confidence - ${item.parseQuality.overall}%`;
 }
 
 function candidateManagementView(state) {
@@ -1179,7 +1242,7 @@ function decisionBadge(status) {
 function uploadPanel(state) {
   const selectedName = state.selectedFile ? state.selectedFile.name : "No PDF selected";
   return `
-    <article class="panel upload-panel">
+    <article class="panel upload-panel ${state.dashboardSection === "upload" ? "section-active" : ""}" data-workflow-section="upload">
       <div class="panel-heading">
         <p class="eyebrow">Step 1</p>
         <h2>Upload CV</h2>
@@ -1199,12 +1262,12 @@ function uploadPanel(state) {
   `;
 }
 
-function statusPanel(item) {
+function statusPanel(item, state = {}) {
   const steps = ["Queued", "Parsing", "Normalizing", "Quality Check", "Ready"];
   const currentIndex = Math.max(0, steps.indexOf(item.status));
   const progress = item.progress || 0;
   return `
-    <article class="panel status-panel">
+    <article class="panel status-panel ${state.dashboardSection === "processing" ? "section-active" : ""}" data-workflow-section="processing">
       <div class="panel-heading">
         <p class="eyebrow">Step 2</p>
         <h2>Processing Status</h2>
@@ -1232,10 +1295,10 @@ function statusPanel(item) {
   `;
 }
 
-function qualityPanel(item) {
+function qualityPanel(item, state = {}) {
   const quality = item.parseQuality;
   return `
-    <article class="panel quality-panel">
+    <article class="panel quality-panel ${state.dashboardSection === "quality" ? "section-active" : ""}" data-workflow-section="quality">
       <div class="panel-heading">
         <p class="eyebrow">Step 3</p>
         <h2>Parse Quality</h2>
@@ -1365,7 +1428,13 @@ function normalizeSearchText(value) {
     .replaceAll("ü", "u")
     .replaceAll("ş", "s")
     .replaceAll("ö", "o")
-    .replaceAll("ç", "c");
+    .replaceAll("ç", "c")
+    .replaceAll("Ä±", "i")
+    .replaceAll("ÄŸ", "g")
+    .replaceAll("Ã¼", "u")
+    .replaceAll("ÅŸ", "s")
+    .replaceAll("Ã¶", "o")
+    .replaceAll("Ã§", "c");
 }
 
 function slugify(value) {
@@ -1435,6 +1504,7 @@ if (typeof module !== "undefined") {
     buildLocalChatResponse,
     buildLocalCandidateSearchAnswer,
     defaultMentionApi,
+    getConfiguredApiBase,
     createInitialState,
     createRecruiterWorkflow,
     defaultAskAiApi,
@@ -1451,6 +1521,7 @@ if (typeof module !== "undefined") {
     normalizeAiAnswer,
     renderMarkdown,
     replaceActiveMention,
+    resolveApiUrl,
     statusClass,
     validatePdfFile,
   };

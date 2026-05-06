@@ -235,18 +235,37 @@ button:focus-visible {
 }
 
 .nav-item {
-  min-height: 40px;
+  display: grid;
+  gap: 4px;
+  min-height: 58px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   background: transparent;
   color: #cbd5e1;
   text-align: left;
-  padding: 9px 10px;
+  padding: 10px 12px;
 }
 
 .nav-item.active {
   background: rgba(15, 118, 110, 0.25);
   color: #fff;
+}
+
+.nav-item strong {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.nav-item span {
+  color: #aeb7c4;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.nav-item.active span {
+  color: #ccfbf1;
 }
 
 .user-card {
@@ -314,6 +333,11 @@ button:focus-visible {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
+}
+
+.panel.section-active {
+  border-color: rgba(15, 118, 110, 0.55);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12), var(--shadow);
 }
 
 .candidate-workspace {
@@ -559,6 +583,7 @@ button:focus-visible {
   overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(160px, 300px) auto;
+  max-height: calc(100vh - 96px);
   margin-top: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -601,6 +626,7 @@ button:focus-visible {
 .chat-message {
   display: grid;
   gap: 5px;
+  min-width: 0;
   max-width: 92%;
 }
 
@@ -679,6 +705,7 @@ button:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: start;
   border-top: 1px solid var(--line);
   padding: 12px;
 }
@@ -718,6 +745,10 @@ button:focus-visible {
   background: #fff;
   padding: 9px 10px;
   text-align: left;
+}
+
+.mention-menu strong {
+  min-width: 0;
 }
 
 .mention-menu button:hover,
@@ -1103,6 +1134,7 @@ th {
 
   .chat-surface {
     grid-template-rows: auto minmax(180px, 260px) auto;
+    max-height: none;
   }
 }
 
