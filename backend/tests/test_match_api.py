@@ -62,4 +62,4 @@ def test_match_endpoint_empty_candidates(test_client):
 
     response = test_client.post("/api/v1/match", json=payload)
     assert response.status_code == 400
-    assert "Aday listesi boÅŸ olamaz" in response.json()["detail"]
+    assert "Aday listesi boş olamaz" in response.json()["detail"]
