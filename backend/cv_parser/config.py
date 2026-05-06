@@ -1,12 +1,18 @@
 # Optimized by Skills Agent for RecruitAI
-# Configuration module for CV Parser
+# Configuration module for CV Parser v2.0
 """
 Parser configuration constants and default values.
 Centralizes all tunable parameters for the PDF parsing pipeline.
+
+v2.0 additions:
+  - OCR timeout per page
+  - Overall parse timeout
+  - Batch concurrent processing limit
+  - Bilingual (TR/EN) error message catalog
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 
 # ── Section Header Patterns (TR + EN) ─────────────────────────────────────
@@ -61,11 +67,14 @@ MAX_PAGES: int = 30
 OCR_DPI: int = 300
 MIN_TEXT_LENGTH_FOR_VALID_PAGE: int = 30
 CONFIDENCE_THRESHOLD: float = 0.60
+OCR_TIMEOUT_SECONDS: int = 30          # v2.0: per-page OCR timeout
+PARSE_TIMEOUT_SECONDS: int = 120       # v2.0: overall parse timeout
+BATCH_CONCURRENT_LIMIT: int = 10       # v2.0: max files in a single batch
 
 
 @dataclass
 class ParserConfig:
-    """Runtime configuration for the PDF parser."""
+    """Runtime configuration for the PDF parser (v2.0)."""
 
     max_file_size: int = MAX_PDF_SIZE_BYTES
     max_pages: int = MAX_PAGES
@@ -74,3 +83,101 @@ class ParserConfig:
     confidence_threshold: float = CONFIDENCE_THRESHOLD
     enable_ocr_fallback: bool = True
     supported_languages: List[str] = field(default_factory=lambda: ["tur", "eng"])
+    # v2.0 additions
+    ocr_timeout_seconds: int = OCR_TIMEOUT_SECONDS
+    parse_timeout_seconds: int = PARSE_TIMEOUT_SECONDS
+    batch_concurrent_limit: int = BATCH_CONCURRENT_LIMIT
+
+
+# ── Bilingual Error Messages (v2.0) ───────────────────────────────────────
+class ErrorMessages:
+    """
+    Standardised bilingual (TR/EN) error catalog.
+    Every error has a code, Turkish message, and English message.
+    """
+
+    EMPTY_FILE = {
+        "code": "ERR_EMPTY_FILE",
+        "tr": "Boş dosya yüklenemez.",
+        "en": "Empty file cannot be uploaded.",
+    }
+    INVALID_PDF = {
+        "code": "ERR_INVALID_PDF",
+        "tr": "Dosya geçerli bir PDF değil.",
+        "en": "File is not a valid PDF.",
+    }
+    FILE_TOO_LARGE = {
+        "code": "ERR_FILE_TOO_LARGE",
+        "tr": "Dosya boyutu izin verilen sınırı aşıyor.",
+        "en": "File size exceeds the allowed limit.",
+    }
+    TOO_MANY_PAGES = {
+        "code": "ERR_TOO_MANY_PAGES",
+        "tr": "PDF sayfa sayısı izin verilen sınırı aşıyor.",
+        "en": "PDF page count exceeds the allowed limit.",
+    }
+    PARSE_TIMEOUT = {
+        "code": "ERR_PARSE_TIMEOUT",
+        "tr": "Ayrıştırma işlemi zaman aşımına uğradı.",
+        "en": "Parse operation timed out.",
+    }
+    OCR_TIMEOUT = {
+        "code": "ERR_OCR_TIMEOUT",
+        "tr": "OCR işlemi zaman aşımına uğradı.",
+        "en": "OCR processing timed out.",
+    }
+    OCR_FAILED = {
+        "code": "ERR_OCR_FAILED",
+        "tr": "OCR işlemi başarısız oldu.",
+        "en": "OCR processing failed.",
+    }
+    EXTRACTION_FAILED = {
+        "code": "ERR_EXTRACTION_FAILED",
+        "tr": "PDF'den metin çıkarılamadı.",
+        "en": "Failed to extract text from PDF.",
+    }
+    NO_TEXT_EXTRACTED = {
+        "code": "ERR_NO_TEXT",
+        "tr": "PDF'den hiçbir metin çıkarılamadı.",
+        "en": "No text could be extracted from the PDF.",
+    }
+    CORRUPTED_PDF = {
+        "code": "ERR_CORRUPTED_PDF",
+        "tr": "PDF dosyası bozuk veya okunamıyor.",
+        "en": "PDF file is corrupted or unreadable.",
+    }
+    UNSUPPORTED_TYPE = {
+        "code": "ERR_UNSUPPORTED_TYPE",
+        "tr": "Yalnızca PDF dosyaları kabul edilir.",
+        "en": "Only PDF files are accepted.",
+    }
+    FILE_NOT_FOUND = {
+        "code": "ERR_FILE_NOT_FOUND",
+        "tr": "Dosya bulunamadı.",
+        "en": "File not found.",
+    }
+    BATCH_LIMIT_EXCEEDED = {
+        "code": "ERR_BATCH_LIMIT",
+        "tr": "Toplu yükleme sınırı aşıldı.",
+        "en": "Batch upload limit exceeded.",
+    }
+    STORAGE_FAILED = {
+        "code": "ERR_STORAGE",
+        "tr": "Dosya depolanamadı.",
+        "en": "File storage failed.",
+    }
+    JOB_NOT_FOUND = {
+        "code": "ERR_JOB_NOT_FOUND",
+        "tr": "İş bulunamadı.",
+        "en": "Job not found.",
+    }
+
+    @staticmethod
+    def format(msg: Dict[str, str], **kwargs) -> Dict[str, str]:
+        """Return a copy with optional format kwargs applied to both languages."""
+        return {
+            "code": msg["code"],
+            "tr": msg["tr"].format(**kwargs) if kwargs else msg["tr"],
+            "en": msg["en"].format(**kwargs) if kwargs else msg["en"],
+        }
+

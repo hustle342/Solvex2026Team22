@@ -93,6 +93,7 @@ def test_client(temp_dirs):
     mock_settings.max_upload_bytes = 20 * 1024 * 1024
     mock_settings.PARSER_OCR_ENABLED = False
     mock_settings.PARSER_MAX_PAGES = 30
+    mock_settings.BATCH_CONCURRENT_LIMIT = 10
 
     with patch("backend.core.config.get_settings", return_value=mock_settings), \
          patch("backend.core.storage.get_settings", return_value=mock_settings), \
@@ -297,6 +298,13 @@ class TestUploadEndpoint:
     def test_batch_upload_empty_rejected(self, test_client):
         resp = test_client.post("/api/v1/upload/batch", files=[])
         assert resp.status_code in (400, 422)
+
+    def test_batch_upload_limit_exceeded(self, test_client):
+        # limit is 10, upload 11 files
+        files = [("files", (f"cv{i}.pdf", _MINIMAL_PDF, "application/pdf")) for i in range(11)]
+        resp = test_client.post("/api/v1/upload/batch", files=files)
+        assert resp.status_code == 400
+        assert "limit" in resp.json()["detail"].lower()
 
 
 class TestJobEndpoints:
