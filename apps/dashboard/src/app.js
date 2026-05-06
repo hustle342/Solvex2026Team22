@@ -18,6 +18,22 @@ const CANDIDATE_ACTIONS = {
   reject: "rejected",
 };
 
+function getApiBaseUrl() {
+  if (typeof window === "undefined" || !window.location) {
+    return "http://127.0.0.1:8000";
+  }
+
+  if (window.RECRUITAI_API_BASE_URL) {
+    return String(window.RECRUITAI_API_BASE_URL).replace(/\/$/, "");
+  }
+
+  if (window.location.port === "8000") {
+    return window.location.origin;
+  }
+
+  return "http://127.0.0.1:8000";
+}
+
 const DEMO_CANDIDATES = [
   {
     id: "cand-001",
@@ -267,7 +283,7 @@ function validatePdfFile(file, maxSizeBytes = 10 * 1024 * 1024) {
 }
 
 async function defaultCandidateActionApi(candidateId, action) {
-  const endpoint = `/api/v1/candidates/${encodeURIComponent(candidateId)}/${action}`;
+  const endpoint = `${getApiBaseUrl()}/api/v1/candidates/${encodeURIComponent(candidateId)}/${action}`;
   const isStaticDemo =
     typeof window !== "undefined" && window.location && ["file:", ""].includes(window.location.protocol);
 
