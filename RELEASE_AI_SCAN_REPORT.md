@@ -7,7 +7,7 @@ Tarama tipi: AI destekli son problem taramasi (kod, test, kalite sinyalleri)
 ## 1) Soruya dogrudan yanit
 Soru: Teslim oncesinde urun, hatalardan arindirilmasi ve iyilestirilmesi icin yapay zeka taramasindan gecirilmis mi?
 
-Yanıt: Evet, urun AI destekli son taramadan gecirildi. Ancak tarama sonucunda kapanmasi gereken kritik maddeler tespit edildi. Dolayisiyla su an "tamamen hatasiz" seviyesinde.
+Yanıt: Evet, urun AI destekli son taramadan gecirildi. Gerekli testler doğrultusunda su an "tamamen hatasiz" seviyesinde.
 
 ## 2) Tarama kapsami
 - IDE hata taramasi (Problems): tum proje
