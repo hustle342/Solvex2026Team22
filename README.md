@@ -1,3 +1,8 @@
+KAPTANI OLDUĞUM BU PROJE SAYESINDE SOLVEX2026 YARIŞMASINDA DERECEYE GIRIP TOPLULUK OZEL ODULU KAZANDIK, EKIP ARKADAŞLARIM CEMİL CAN OZ VE SAMET TANAY'A TEŞEKKURLERİMLE!
+
+
+
+
 # RecruitAI
 
 RecruitAI, ise alim sureclerini daha hizli, daha gorunur ve daha aciklanabilir hale getirmek icin gelistirilmis yapay zeka destekli bir ise alim panelidir. Sistem; aday CV'lerinin yuklenmesi, ayristirilmasi, ayristirma kalitesinin izlenmesi, adaylarin puanlanarak siralanmasi ve ise alim uzmaninin bu puanlari yorumlayabilmesi icin aciklanabilir karar destegi sunar. Boylece kullanici yalnizca aday listesini gormekle kalmaz, ayni zamanda adayin neden one ciktigini veya neden daha dusuk degerlendirildigini de anlayabilir.
